@@ -1,0 +1,39 @@
+## Coding Style
+- Favor readability; keep modules under ~400 lines or split into helpers.
+- Use type hints everywhere, including private helpers.
+- Prefer dataclasses/Pydantic models for structured data returned to clients.
+- Keep comments short and purposeful; bilingual (TH/EN) comments are acceptable when helpful.
+- Follow existing docstring style (triple double-quoted, sentence case).
+
+## FastAPI & Routing
+- Group related endpoints in `main.py` with section separators.
+- Always validate uploads (filename, extension, size) before processing.
+- Use `HTTPException` with specific status codes and localized error messages.
+- Return Pydantic schema instances (from `schemas.py`) instead of bare dicts when possible.
+- Add new background tasks/endpoints behind clear feature flags or query params.
+
+## OpenAI Agents
+- Interact with OpenAI via `utils.openai_client.get_openai_client()`; never instantiate `OpenAI` directly elsewhere.
+- Keep prompts concise, context-rich, and interpolated via f-strings.
+- For image generation, explicitly set `response_format="b64_json"` and limit size to `1024x1024` unless requirements change.
+
+## OCR / File Processing
+- Reuse helpers in `utils/ocr_reader.py`, `utils/pdf_reader.py`, and `utils/unzipper.py`; do not duplicate OCR logic.
+- Guard heavy operations with size limits (`MAX_*` constants) and raise `HTTPException` when exceeded.
+- When adding new file types, update both extension allow-lists and MIME checks.
+
+## Configuration & Secrets
+- Load environment variables through `dotenv` at import time (`load_dotenv(..., override=True)`).
+- Document any new env var in `.env.example` and mention it in `README.md`.
+- Never hardcode secrets or external paths; rely on env vars like `OPENAI_API_KEY`, `TESSERACT_CMD`, `POPPLER_PATH`.
+
+## Testing & Validation
+- Add smoke/integration tests before major refactors (use pytest).
+- Validate OCR/translation outputs for empty strings and strip whitespace before returning.
+- Prefer deterministic sample data for unit tests (e.g., fixture menus).
+
+## Error Handling & Logging
+- Catch expected third-party exceptions (e.g., `PDFReadError`, `OpenAIError`) and wrap them in meaningful responses.
+- Avoid broad bare `except`; log or re-raise with context.
+- When adding async tasks, ensure exceptions propagate via FastAPI handlers.
+

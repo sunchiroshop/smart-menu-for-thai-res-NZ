@@ -1,0 +1,2 @@
+"""SmartMenu package initializer."""
+
