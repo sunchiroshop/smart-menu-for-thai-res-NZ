@@ -2,13 +2,25 @@
 
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Shield, Users, Utensils, Truck, Store, Plus, Trash2, Edit2, Save, X, Loader2, Globe, ExternalLink, MapPin, Navigation } from 'lucide-react';
+import { Shield, Users, Utensils, Truck, Store, Plus, Trash2, Edit2, Save, X, Loader2, Globe, ExternalLink, MapPin, Navigation, CreditCard, Building2, QrCode } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface ServiceOptions {
   dine_in: boolean;
   pickup: boolean;
   delivery: boolean;
+}
+
+interface BankAccount {
+  bank_name: string;
+  account_name: string;
+  account_number: string;
+}
+
+interface PaymentSettings {
+  accept_card: boolean;
+  accept_bank_transfer: boolean;
+  bank_accounts: BankAccount[];
 }
 
 interface DeliveryRate {
@@ -66,7 +78,7 @@ function SettingsContent() {
   const searchParams = useSearchParams();
   const initialTab = searchParams.get('tab') || 'profile';
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'services' | 'staff' | 'billing'>(initialTab as any);
+  const [activeTab, setActiveTab] = useState<'profile' | 'services' | 'staff' | 'payments' | 'billing'>(initialTab as any);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -137,6 +149,20 @@ function SettingsContent() {
     phone: '',
     role: 'waiter' as Staff['role'],
     pin_code: ''
+  });
+
+  // Payment Settings state
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings>({
+    accept_card: true,
+    accept_bank_transfer: false,
+    bank_accounts: []
+  });
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [showAddBank, setShowAddBank] = useState(false);
+  const [newBankAccount, setNewBankAccount] = useState<BankAccount>({
+    bank_name: '',
+    account_name: '',
+    account_number: ''
   });
 
   // Image optimization helper
@@ -288,6 +314,9 @@ function SettingsContent() {
 
       // Load staff list
       loadStaff(profile.restaurant.restaurant_id);
+
+      // Load payment settings
+      loadPaymentSettings(profile.restaurant.restaurant_id);
     }
   }, [profile]);
 
@@ -354,6 +383,83 @@ function SettingsContent() {
     } finally {
       setLocationLoading(false);
     }
+  };
+
+  // ============================================================
+  // Payment Settings Functions
+  // ============================================================
+
+  const loadPaymentSettings = async (restaurantId: string) => {
+    if (!restaurantId) return;
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/restaurant/${restaurantId}/payment-settings`);
+      const data = await response.json();
+      if (data.success && data.payment_settings) {
+        setPaymentSettings(data.payment_settings);
+      }
+    } catch (error) {
+      console.error('Failed to load payment settings:', error);
+    }
+  };
+
+  const savePaymentSettings = async () => {
+    if (!profile?.restaurant?.restaurant_id) return;
+
+    // Validate: at least one payment method must be enabled
+    if (!paymentSettings.accept_card && !paymentSettings.accept_bank_transfer) {
+      alert('ต้องเปิดใช้งานอย่างน้อย 1 วิธีการชำระเงิน');
+      return;
+    }
+
+    // Validate: if bank transfer enabled, must have at least one bank account
+    if (paymentSettings.accept_bank_transfer && paymentSettings.bank_accounts.length === 0) {
+      alert('กรุณาเพิ่มบัญชีธนาคารอย่างน้อย 1 บัญชี');
+      return;
+    }
+
+    setSavingPayment(true);
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/restaurant/${profile.restaurant.restaurant_id}/payment-settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paymentSettings)
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert('บันทึกการตั้งค่าการชำระเงินสำเร็จ');
+      } else {
+        alert(data.detail || 'Failed to save payment settings');
+      }
+    } catch (error) {
+      console.error('Failed to save payment settings:', error);
+      alert('Failed to save payment settings');
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const addBankAccount = () => {
+    if (!newBankAccount.bank_name || !newBankAccount.account_name || !newBankAccount.account_number) {
+      alert('กรุณากรอกข้อมูลบัญชีธนาคารให้ครบถ้วน');
+      return;
+    }
+
+    setPaymentSettings({
+      ...paymentSettings,
+      bank_accounts: [...paymentSettings.bank_accounts, { ...newBankAccount }]
+    });
+
+    setNewBankAccount({ bank_name: '', account_name: '', account_number: '' });
+    setShowAddBank(false);
+  };
+
+  const removeBankAccount = (index: number) => {
+    const newAccounts = paymentSettings.bank_accounts.filter((_, i) => i !== index);
+    setPaymentSettings({
+      ...paymentSettings,
+      bank_accounts: newAccounts
+    });
   };
 
   // ============================================================
@@ -966,6 +1072,17 @@ function SettingsContent() {
             >
               <Users className="w-4 h-4" />
               Staff Management
+            </button>
+            <button
+              onClick={() => setActiveTab('payments')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap flex items-center gap-2 ${
+                activeTab === 'payments'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <CreditCard className="w-4 h-4" />
+              Payment Settings
             </button>
             <button
               onClick={() => setActiveTab('billing')}
@@ -1991,6 +2108,215 @@ function SettingsContent() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Payment Settings Tab */}
+        {activeTab === 'payments' && (
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center gap-2">
+              <CreditCard className="w-6 h-6" />
+              Payment Settings
+            </h2>
+            <p className="text-sm text-gray-600 mb-6">
+              ตั้งค่าวิธีการชำระเงินที่ร้านของคุณรองรับ ลูกค้าจะเห็นเฉพาะตัวเลือกที่คุณเปิดใช้งาน
+            </p>
+
+            {/* Card Payments (Stripe) */}
+            <div className="border border-gray-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <CreditCard className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Card Payments</h3>
+                    <p className="text-sm text-gray-600">
+                      รับชำระผ่าน Visa, Mastercard, Amex, Apple Pay, Google Pay
+                    </p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={paymentSettings.accept_card}
+                    onChange={(e) => setPaymentSettings({
+                      ...paymentSettings,
+                      accept_card: e.target.checked
+                    })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+              {paymentSettings.accept_card && (
+                <div className="mt-3 ml-13 p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-800">
+                    ✓ ลูกค้าจะสามารถชำระเงินผ่าน Stripe Checkout ได้
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Bank Transfer */}
+            <div className="border border-gray-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                    <Building2 className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Bank Transfer</h3>
+                    <p className="text-sm text-gray-600">
+                      รับชำระผ่านการโอนเงิน + QR Code
+                    </p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={paymentSettings.accept_bank_transfer}
+                    onChange={(e) => setPaymentSettings({
+                      ...paymentSettings,
+                      accept_bank_transfer: e.target.checked
+                    })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                </label>
+              </div>
+
+              {/* Bank Accounts List */}
+              {paymentSettings.accept_bank_transfer && (
+                <div className="mt-4 ml-13">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-medium text-gray-900">Bank Accounts</h4>
+                    <button
+                      onClick={() => setShowAddBank(true)}
+                      className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Account
+                    </button>
+                  </div>
+
+                  {/* Bank Accounts */}
+                  {paymentSettings.bank_accounts.length === 0 ? (
+                    <div className="text-center py-4 bg-gray-50 rounded-lg">
+                      <Building2 className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                      <p className="text-sm text-gray-500">ยังไม่มีบัญชีธนาคาร</p>
+                      <p className="text-xs text-gray-400">กรุณาเพิ่มบัญชีธนาคารเพื่อรับการโอนเงิน</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {paymentSettings.bank_accounts.map((account, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div>
+                            <p className="font-medium text-gray-900">{account.bank_name}</p>
+                            <p className="text-sm text-gray-600">{account.account_name}</p>
+                            <p className="text-sm font-mono text-gray-600">{account.account_number}</p>
+                          </div>
+                          <button
+                            onClick={() => removeBankAccount(index)}
+                            className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add Bank Account Form */}
+                  {showAddBank && (
+                    <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <h5 className="font-medium text-gray-900 mb-3">Add Bank Account</h5>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-sm text-gray-700 mb-1">Bank Name</label>
+                          <input
+                            type="text"
+                            value={newBankAccount.bank_name}
+                            onChange={(e) => setNewBankAccount({ ...newBankAccount, bank_name: e.target.value })}
+                            placeholder="e.g., ANZ, ASB, Westpac, BNZ"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-gray-700 mb-1">Account Name</label>
+                          <input
+                            type="text"
+                            value={newBankAccount.account_name}
+                            onChange={(e) => setNewBankAccount({ ...newBankAccount, account_name: e.target.value })}
+                            placeholder="e.g., Thai Kitchen Ltd"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-gray-700 mb-1">Account Number</label>
+                          <input
+                            type="text"
+                            value={newBankAccount.account_number}
+                            onChange={(e) => setNewBankAccount({ ...newBankAccount, account_number: e.target.value })}
+                            placeholder="e.g., 06-0000-0000000-00"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white font-mono focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={addBankAccount}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+                          >
+                            Add Account
+                          </button>
+                          <button
+                            onClick={() => {
+                              setShowAddBank(false);
+                              setNewBankAccount({ bank_name: '', account_name: '', account_number: '' });
+                            }}
+                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Info Box */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+              <h4 className="font-medium text-yellow-800 mb-2">📋 How it works</h4>
+              <ul className="text-sm text-yellow-700 space-y-1">
+                <li>• ลูกค้าต้องชำระเงินก่อนที่ออร์เดอร์จะเข้าครัว</li>
+                <li>• หากเปิด Bank Transfer ลูกค้าจะเห็น QR Code และเลขบัญชี</li>
+                <li>• คุณต้องตรวจสอบการโอนเงินด้วยตัวเองใน Orders Dashboard</li>
+                <li>• ต้องเปิดใช้งานอย่างน้อย 1 วิธีการชำระเงิน</li>
+              </ul>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex justify-end">
+              <button
+                onClick={savePaymentSettings}
+                disabled={savingPayment}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {savingPayment ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-5 h-5" />
+                    Save Payment Settings
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         )}
 

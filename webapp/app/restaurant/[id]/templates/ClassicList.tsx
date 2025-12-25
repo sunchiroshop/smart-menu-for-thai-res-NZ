@@ -1,0 +1,124 @@
+import { Utensils, Plus, Star, Flame } from 'lucide-react';
+
+interface MenuItem {
+  menu_id: string;
+  name: string;
+  nameEn?: string;
+  description?: string;
+  descriptionEn?: string;
+  price: string;
+  category: string;
+  categoryEn?: string;
+  photo_url?: string;
+  is_best_seller?: boolean;
+  meats?: Array<{name: string; nameEn?: string; price: string}>;
+  addOns?: Array<{name: string; nameEn?: string; price: string}>;
+}
+
+interface ClassicListProps {
+  menus: MenuItem[];
+  groupedMenus: Record<string, MenuItem[]>;
+  themeColor: string;
+  onItemClick: (item: MenuItem) => void;
+}
+
+export default function ClassicList({ menus, groupedMenus, themeColor, onItemClick }: ClassicListProps) {
+  const isBestsellerCategory = (category: string) => category.toLowerCase() === 'bestseller';
+
+  return (
+    <div className="space-y-12">
+      {Object.entries(groupedMenus).map(([category, items]) => (
+        <div key={category} id={`category-${category.replace(/\s+/g, '-')}`} className="scroll-mt-20">
+          {/* Category Header - Special style for Bestseller */}
+          <div
+            className={`mb-6 pb-2 border-b-2 ${isBestsellerCategory(category) ? 'bg-gradient-to-r from-orange-50 to-red-50 -mx-4 px-4 py-4 rounded-xl border-orange-400' : ''}`}
+            style={{ borderColor: isBestsellerCategory(category) ? '#f97316' : themeColor }}
+          >
+            <h2 className={`text-3xl font-bold flex items-center gap-3 ${isBestsellerCategory(category) ? 'text-orange-600' : 'text-gray-900'}`}>
+              {isBestsellerCategory(category) && <Flame className="w-8 h-8 text-orange-500 fill-orange-500" />}
+              {isBestsellerCategory(category) ? 'Bestseller' : category}
+              {isBestsellerCategory(category) && <span className="text-lg font-normal text-orange-500">Popular dishes</span>}
+            </h2>
+          </div>
+
+          {/* Items List */}
+          <div className="space-y-4">
+            {items.map((menu) => (
+              <div
+                key={menu.menu_id}
+                className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all overflow-hidden cursor-pointer"
+                onClick={() => onItemClick(menu)}
+              >
+                <div className="flex">
+                  {/* Photo */}
+                  {menu.photo_url && (
+                    <div className="w-32 h-32 flex-shrink-0 bg-gray-200">
+                      <img
+                        src={menu.photo_url}
+                        alt={menu.name}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+
+                  {/* Content */}
+                  <div className="flex-1 p-4 flex items-center justify-between">
+                    <div className="flex-1">
+                      {/* Name with Best Seller Badge */}
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-lg font-bold text-gray-900">
+                          {menu.name}
+                        </h3>
+                        {menu.is_best_seller && (
+                          <span className="inline-flex items-center px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-xs font-semibold">
+                            <Star className="w-3 h-3 mr-1 fill-current" />
+                            Best Seller
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Description */}
+                      {menu.description && (
+                        <p className="text-sm text-gray-600 mb-2 line-clamp-2">
+                          {menu.description}
+                        </p>
+                      )}
+                      
+                      {/* Add-ons indicator */}
+                      {(menu.meats && menu.meats.length > 0) || (menu.addOns && menu.addOns.length > 0) ? (
+                        <p className="text-xs text-gray-500">
+                          {menu.meats && menu.meats.length > 0 && `Choice of ${menu.meats.length} meats`}
+                          {menu.meats && menu.meats.length > 0 && menu.addOns && menu.addOns.length > 0 && ' • '}
+                          {menu.addOns && menu.addOns.length > 0 && `${menu.addOns.length} add-ons available`}
+                        </p>
+                      ) : null}
+                    </div>
+                    
+                    {/* Price & Add Button */}
+                    <div className="flex flex-col items-end gap-2 ml-4">
+                      <span className="text-2xl font-bold" style={{ color: themeColor }}>
+                        ${menu.price}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onItemClick(menu);
+                        }}
+                        className="px-4 py-2 text-white rounded-lg font-semibold transition-all hover:scale-105 text-sm flex items-center gap-1"
+                        style={{ backgroundColor: themeColor }}
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+

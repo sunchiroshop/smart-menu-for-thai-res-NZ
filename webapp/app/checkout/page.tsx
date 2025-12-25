@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { CreditCard, Lock, Check, ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { SUBSCRIPTION_PLANS } from '@/lib/subscription/plans';
-import { getStripe, getPriceId } from '@/lib/stripe/config';
+import { getPriceId } from '@/lib/stripe/config';
 import { createClient } from '@/lib/supabase/client';
 
 function CheckoutContent() {
@@ -78,19 +78,12 @@ function CheckoutContent() {
       }
 
       const data = await response.json();
-      
-      // Redirect to Stripe Checkout
-      const stripe = await getStripe();
-      if (!stripe) {
-        throw new Error('Failed to load Stripe');
-      }
 
-      const { error: stripeError } = await stripe.redirectToCheckout({
-        sessionId: data.session_id,
-      });
-
-      if (stripeError) {
-        throw new Error(stripeError.message);
+      // Redirect to Stripe Checkout using the URL from backend
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else {
+        throw new Error('No checkout URL returned');
       }
     } catch (err: any) {
       console.error('Checkout error:', err);
