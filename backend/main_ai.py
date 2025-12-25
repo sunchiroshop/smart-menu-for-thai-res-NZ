@@ -2426,12 +2426,20 @@ class DeliveryRateItem(BaseModel):
     distance_km: float
     price: float
 
+class DeliverySettingsItem(BaseModel):
+    pricing_mode: str = 'per_km'  # 'tier' or 'per_km'
+    price_per_km: float = 1.50
+    base_fee: float = 3.00
+    max_distance_km: float = 15
+    free_delivery_above: float = 0  # 0 = no free delivery
+
 class UpdateServiceOptionsRequest(BaseModel):
     restaurant_id: str
     user_id: str
     service_options: Dict[str, bool]  # {"dine_in": true, "pickup": false, "delivery": true}
     primary_language: Optional[str] = None  # 'th', 'en', 'zh', 'ja', 'ko', etc.
     delivery_rates: Optional[List[DeliveryRateItem]] = None  # [{"id": "uuid", "distance_km": 5, "price": 3.50}]
+    delivery_settings: Optional[DeliverySettingsItem] = None  # Per-km pricing settings
 
 @app.put("/api/restaurant/service-options", summary="Update Service Options")
 async def update_service_options(request: UpdateServiceOptionsRequest):
@@ -2472,6 +2480,9 @@ async def update_service_options(request: UpdateServiceOptionsRequest):
         if request.delivery_rates is not None:
             # Convert to list of dicts for JSON storage
             update_data["delivery_rates"] = [rate.model_dump() for rate in request.delivery_rates]
+        if request.delivery_settings is not None:
+            # Save delivery settings (per-km pricing)
+            update_data["delivery_settings"] = request.delivery_settings.model_dump()
 
         updated_restaurant = restaurant_service.update_restaurant(
             request.restaurant_id,
@@ -2486,7 +2497,7 @@ async def update_service_options(request: UpdateServiceOptionsRequest):
             )
 
         delivery_rates_count = len(request.delivery_rates) if request.delivery_rates else 0
-        print(f"✅ Service options updated for restaurant {request.restaurant_id}: {request.service_options}, language: {request.primary_language}, delivery_rates: {delivery_rates_count} tiers")
+        print(f"✅ Service options updated for restaurant {request.restaurant_id}: {request.service_options}, language: {request.primary_language}, delivery_rates: {delivery_rates_count} tiers, delivery_settings: {request.delivery_settings}")
 
         return {
             "success": True,
@@ -2494,6 +2505,7 @@ async def update_service_options(request: UpdateServiceOptionsRequest):
             "service_options": request.service_options,
             "primary_language": request.primary_language,
             "delivery_rates": [rate.model_dump() for rate in request.delivery_rates] if request.delivery_rates else [],
+            "delivery_settings": request.delivery_settings.model_dump() if request.delivery_settings else None,
             "message": "Service options updated successfully"
         }
 
@@ -3970,9 +3982,9 @@ async def calculate_delivery_fee(request: DeliveryCalculationRequest):
     Calculate delivery fee based on customer address and restaurant location
 
     1. Gets restaurant location (lat/lng) from database
-    2. Geocodes customer address using Google Maps
-    3. Calculates distance using Google Distance Matrix API
-    4. Returns delivery fee based on restaurant's delivery rates
+    2. Geocodes customer address using Nominatim
+    3. Calculates distance using Haversine formula
+    4. Returns delivery fee based on restaurant's delivery settings (per-km or tier-based)
     """
     try:
         # Get restaurant details
@@ -3990,26 +4002,87 @@ async def calculate_delivery_fee(request: DeliveryCalculationRequest):
                 detail="Restaurant location not configured. Please set restaurant coordinates in settings."
             )
 
-        # Get delivery rates
+        # Get delivery settings and rates
+        delivery_settings = restaurant.get("delivery_settings") or {}
         delivery_rates = restaurant.get("delivery_rates") or []
+        pricing_mode = delivery_settings.get("pricing_mode", "per_km")
 
-        if not delivery_rates:
+        # Default settings
+        base_fee = delivery_settings.get("base_fee", 3.00)
+        price_per_km = delivery_settings.get("price_per_km", 1.50)
+        max_distance_km = delivery_settings.get("max_distance_km", 15)
+        free_delivery_above = delivery_settings.get("free_delivery_above", 0)
+
+        # Geocode customer address
+        customer_location = await delivery_service.geocode_address(request.customer_address)
+        if not customer_location:
             return {
-                "success": True,
-                "message": "No delivery rates configured",
-                "delivery_fee": 0,
-                "is_within_range": True
+                "success": False,
+                "error": "Could not find the address. Please check and try again."
             }
 
-        # Calculate delivery
-        result = await delivery_service.calculate_delivery_for_address(
-            restaurant_lat=float(restaurant_lat),
-            restaurant_lng=float(restaurant_lng),
-            customer_address=request.customer_address,
-            delivery_rates=delivery_rates
+        # Calculate distance
+        distance_km = delivery_service.haversine_distance(
+            float(restaurant_lat), float(restaurant_lng),
+            customer_location["lat"], customer_location["lng"]
         )
 
-        return result
+        # Apply road distance factor (roads are typically 1.3x longer than straight line)
+        distance_km = delivery_service.estimate_road_distance(distance_km)
+        duration_minutes = delivery_service.estimate_duration(distance_km)
+
+        # Check if within range
+        if pricing_mode == "per_km":
+            max_dist = max_distance_km
+        else:
+            # For tier-based, get max from delivery rates
+            max_dist = max(rate.get("distance_km", 0) for rate in delivery_rates) if delivery_rates else 15
+
+        if distance_km > max_dist:
+            return {
+                "success": True,
+                "is_within_range": False,
+                "distance_km": round(distance_km, 1),
+                "distance_text": f"{round(distance_km, 1)} km",
+                "max_distance_km": max_dist,
+                "message": f"Sorry, we only deliver within {max_dist} km",
+                "formatted_address": customer_location.get("formatted_address")
+            }
+
+        # Calculate delivery fee
+        if pricing_mode == "per_km":
+            # Per-km pricing: base_fee + (distance * price_per_km)
+            delivery_fee = base_fee + (distance_km * price_per_km)
+            delivery_fee = round(delivery_fee, 2)
+        else:
+            # Tier-based pricing
+            delivery_fee = 0
+            for rate in sorted(delivery_rates, key=lambda x: x.get("distance_km", 0)):
+                if distance_km <= rate.get("distance_km", 0):
+                    delivery_fee = rate.get("price", 0)
+                    break
+            if delivery_fee == 0 and delivery_rates:
+                # Use highest tier if beyond all tiers
+                delivery_fee = max(rate.get("price", 0) for rate in delivery_rates)
+
+        return {
+            "success": True,
+            "is_within_range": True,
+            "customer_location": {
+                "lat": customer_location["lat"],
+                "lng": customer_location["lng"],
+                "formatted_address": customer_location.get("formatted_address")
+            },
+            "distance_km": round(distance_km, 1),
+            "distance_text": f"{round(distance_km, 1)} km",
+            "duration_minutes": duration_minutes,
+            "duration_text": f"{duration_minutes} mins",
+            "delivery_fee": delivery_fee,
+            "pricing_mode": pricing_mode,
+            "free_delivery_above": free_delivery_above,
+            "formatted_address": customer_location.get("formatted_address"),
+            "message": f"Delivery fee calculated"
+        }
 
     except HTTPException:
         raise

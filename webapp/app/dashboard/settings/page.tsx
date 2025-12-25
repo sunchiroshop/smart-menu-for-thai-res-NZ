@@ -29,6 +29,14 @@ interface DeliveryRate {
   price: number;
 }
 
+interface DeliverySettings {
+  pricing_mode: 'tier' | 'per_km';  // tier = ตามระยะทาง, per_km = ต่อกิโลเมตร
+  price_per_km: number;             // ราคาต่อกิโลเมตร
+  base_fee: number;                 // ค่าส่งขั้นต่ำ
+  max_distance_km: number;          // ระยะทางสูงสุดที่จัดส่ง
+  free_delivery_above: number;      // ส่งฟรีเมื่อยอดสั่งซื้อเกิน (0 = ไม่มี)
+}
+
 interface Staff {
   id: string;
   name: string;
@@ -111,6 +119,15 @@ function SettingsContent() {
   const [editingRate, setEditingRate] = useState<DeliveryRate | null>(null);
   const [newRate, setNewRate] = useState({ distance_km: '', price: '' });
   const [showAddRate, setShowAddRate] = useState(false);
+
+  // Delivery Settings state (per-km pricing)
+  const [deliverySettings, setDeliverySettings] = useState<DeliverySettings>({
+    pricing_mode: 'per_km',
+    price_per_km: 1.50,
+    base_fee: 3.00,
+    max_distance_km: 15,
+    free_delivery_above: 0
+  });
 
   // Restaurant Location state (for delivery distance calculation)
   const [restaurantLocation, setRestaurantLocation] = useState<{
@@ -302,6 +319,11 @@ function SettingsContent() {
       // Load delivery rates
       if ((profile.restaurant as any).delivery_rates) {
         setDeliveryRates((profile.restaurant as any).delivery_rates);
+      }
+
+      // Load delivery settings (per-km pricing)
+      if ((profile.restaurant as any).delivery_settings) {
+        setDeliverySettings((profile.restaurant as any).delivery_settings);
       }
 
       // Load primary language
@@ -590,7 +612,8 @@ function SettingsContent() {
           user_id: session.user.id,
           service_options: serviceOptions,
           primary_language: primaryLanguage,
-          delivery_rates: deliveryRates
+          delivery_rates: deliveryRates,
+          delivery_settings: deliverySettings
         })
       });
 
@@ -1625,169 +1648,291 @@ function SettingsContent() {
                 </div>
               )}
 
-              {/* Delivery Rates Section - Only show when delivery is enabled */}
+              {/* Delivery Settings Section - Only show when delivery is enabled */}
               {serviceOptions.delivery && (
                 <div className="mt-4 ml-16 p-4 bg-green-50 rounded-xl border border-green-200">
                   <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                     <Truck className="w-5 h-5 text-green-600" />
-                    ค่าส่ง Delivery ตามระยะทาง
+                    การตั้งค่าค่าส่ง Delivery
                   </h4>
-                  <p className="text-sm text-gray-600 mb-4">
-                    กำหนดค่าส่งตามระยะทาง (กิโลเมตร) จากร้านถึงลูกค้า
-                  </p>
 
-                  {/* Delivery Rates List */}
-                  {deliveryRates.length > 0 && (
-                    <div className="space-y-2 mb-4">
-                      {deliveryRates.sort((a, b) => a.distance_km - b.distance_km).map((rate) => (
-                        <div key={rate.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
-                          {editingRate?.id === rate.id ? (
-                            <>
-                              <div className="flex items-center gap-3">
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    value={editingRate.distance_km}
-                                    onChange={(e) => setEditingRate({...editingRate, distance_km: parseFloat(e.target.value) || 0})}
-                                    className="w-20 px-2 py-1 border rounded text-center"
-                                    step="0.5"
-                                    min="0"
-                                  />
-                                  <span className="text-sm text-gray-500">km</span>
-                                </div>
-                                <span className="text-gray-400">=</span>
-                                <div className="flex items-center gap-1">
-                                  <span className="text-sm text-gray-500">$</span>
-                                  <input
-                                    type="number"
-                                    value={editingRate.price}
-                                    onChange={(e) => setEditingRate({...editingRate, price: parseFloat(e.target.value) || 0})}
-                                    className="w-20 px-2 py-1 border rounded text-center"
-                                    step="0.5"
-                                    min="0"
-                                  />
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => {
-                                    setDeliveryRates(deliveryRates.map(r => r.id === editingRate.id ? editingRate : r));
-                                    setEditingRate(null);
-                                  }}
-                                  className="p-1 text-green-600 hover:bg-green-100 rounded"
-                                >
-                                  <Save className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => setEditingRate(null)}
-                                  className="p-1 text-gray-500 hover:bg-gray-100 rounded"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <div className="flex items-center gap-3">
-                                <span className="text-sm font-medium text-gray-700">
-                                  ระยะทางไม่เกิน <span className="text-green-600 font-bold">{rate.distance_km}</span> km
-                                </span>
-                                <span className="text-gray-400">=</span>
-                                <span className="text-sm font-bold text-green-600">
-                                  ${rate.price.toFixed(2)}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => setEditingRate(rate)}
-                                  className="p-1 text-blue-600 hover:bg-blue-100 rounded"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => setDeliveryRates(deliveryRates.filter(r => r.id !== rate.id))}
-                                  className="p-1 text-red-600 hover:bg-red-100 rounded"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </>
+                  {/* Pricing Mode Toggle */}
+                  <div className="mb-4">
+                    <p className="text-sm text-gray-600 mb-3">เลือกวิธีคำนวณค่าส่ง:</p>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setDeliverySettings({...deliverySettings, pricing_mode: 'per_km'})}
+                        className={`flex-1 p-3 rounded-lg border-2 transition-all ${
+                          deliverySettings.pricing_mode === 'per_km'
+                            ? 'border-green-500 bg-green-100'
+                            : 'border-gray-200 bg-white hover:border-green-300'
+                        }`}
+                      >
+                        <div className="font-medium text-gray-900">คิดตามกิโลเมตร</div>
+                        <div className="text-xs text-gray-500 mt-1">ค่าพื้นฐาน + (ระยะทาง × ราคาต่อ km)</div>
+                      </button>
+                      <button
+                        onClick={() => setDeliverySettings({...deliverySettings, pricing_mode: 'tier'})}
+                        className={`flex-1 p-3 rounded-lg border-2 transition-all ${
+                          deliverySettings.pricing_mode === 'tier'
+                            ? 'border-green-500 bg-green-100'
+                            : 'border-gray-200 bg-white hover:border-green-300'
+                        }`}
+                      >
+                        <div className="font-medium text-gray-900">คิดตามระยะทาง (ขั้นบันได)</div>
+                        <div className="text-xs text-gray-500 mt-1">กำหนดราคาตามช่วงระยะทาง</div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Per-KM Pricing Settings */}
+                  {deliverySettings.pricing_mode === 'per_km' && (
+                    <div className="space-y-4 p-4 bg-white rounded-lg border border-green-200">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            ค่าส่งพื้นฐาน (Base Fee)
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-500">$</span>
+                            <input
+                              type="number"
+                              value={deliverySettings.base_fee}
+                              onChange={(e) => setDeliverySettings({...deliverySettings, base_fee: parseFloat(e.target.value) || 0})}
+                              className="flex-1 px-3 py-2 border rounded-lg text-gray-900 bg-white"
+                              step="0.5"
+                              min="0"
+                            />
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">ค่าส่งขั้นต่ำที่เก็บทุกออเดอร์</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            ราคาต่อกิโลเมตร
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-500">$</span>
+                            <input
+                              type="number"
+                              value={deliverySettings.price_per_km}
+                              onChange={(e) => setDeliverySettings({...deliverySettings, price_per_km: parseFloat(e.target.value) || 0})}
+                              className="flex-1 px-3 py-2 border rounded-lg text-gray-900 bg-white"
+                              step="0.1"
+                              min="0"
+                            />
+                            <span className="text-gray-500">/km</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            ระยะทางสูงสุดที่จัดส่ง
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              value={deliverySettings.max_distance_km}
+                              onChange={(e) => setDeliverySettings({...deliverySettings, max_distance_km: parseFloat(e.target.value) || 0})}
+                              className="flex-1 px-3 py-2 border rounded-lg text-gray-900 bg-white"
+                              step="1"
+                              min="1"
+                            />
+                            <span className="text-gray-500">km</span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            ส่งฟรีเมื่อยอดสั่งเกิน
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-500">$</span>
+                            <input
+                              type="number"
+                              value={deliverySettings.free_delivery_above}
+                              onChange={(e) => setDeliverySettings({...deliverySettings, free_delivery_above: parseFloat(e.target.value) || 0})}
+                              className="flex-1 px-3 py-2 border rounded-lg text-gray-900 bg-white"
+                              step="5"
+                              min="0"
+                            />
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">0 = ไม่มีส่งฟรี</p>
+                        </div>
+                      </div>
+
+                      {/* Preview Calculation */}
+                      <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
+                        <p className="text-sm font-medium text-green-800 mb-2">ตัวอย่างการคำนวณ:</p>
+                        <div className="text-sm text-green-700 space-y-1">
+                          <p>• 5 km = ${(deliverySettings.base_fee + (5 * deliverySettings.price_per_km)).toFixed(2)} (${deliverySettings.base_fee} + 5 × ${deliverySettings.price_per_km})</p>
+                          <p>• 10 km = ${(deliverySettings.base_fee + (10 * deliverySettings.price_per_km)).toFixed(2)} (${deliverySettings.base_fee} + 10 × ${deliverySettings.price_per_km})</p>
+                          {deliverySettings.free_delivery_above > 0 && (
+                            <p className="text-green-600 font-medium">• ส่งฟรีเมื่อยอดสั่งเกิน ${deliverySettings.free_delivery_above}</p>
                           )}
                         </div>
-                      ))}
+                      </div>
                     </div>
                   )}
 
-                  {/* Add New Rate Form */}
-                  {showAddRate ? (
-                    <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-dashed border-green-300">
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          value={newRate.distance_km}
-                          onChange={(e) => setNewRate({...newRate, distance_km: e.target.value})}
-                          placeholder="5"
-                          className="w-20 px-2 py-1 border rounded text-center"
-                          step="0.5"
-                          min="0"
-                        />
-                        <span className="text-sm text-gray-500">km</span>
-                      </div>
-                      <span className="text-gray-400">=</span>
-                      <div className="flex items-center gap-1">
-                        <span className="text-sm text-gray-500">$</span>
-                        <input
-                          type="number"
-                          value={newRate.price}
-                          onChange={(e) => setNewRate({...newRate, price: e.target.value})}
-                          placeholder="3.50"
-                          className="w-20 px-2 py-1 border rounded text-center"
-                          step="0.5"
-                          min="0"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2 ml-auto">
-                        <button
-                          onClick={() => {
-                            if (newRate.distance_km && newRate.price) {
-                              setDeliveryRates([...deliveryRates, {
-                                id: crypto.randomUUID(),
-                                distance_km: parseFloat(newRate.distance_km),
-                                price: parseFloat(newRate.price)
-                              }]);
-                              setNewRate({ distance_km: '', price: '' });
-                              setShowAddRate(false);
-                            }
-                          }}
-                          className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
-                        >
-                          เพิ่ม
-                        </button>
-                        <button
-                          onClick={() => {
-                            setNewRate({ distance_km: '', price: '' });
-                            setShowAddRate(false);
-                          }}
-                          className="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300"
-                        >
-                          ยกเลิก
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowAddRate(true)}
-                      className="flex items-center gap-2 px-4 py-2 text-green-600 border border-green-300 rounded-lg hover:bg-green-50 transition-colors"
-                    >
-                      <Plus className="w-4 h-4" />
-                      เพิ่มอัตราค่าส่ง
-                    </button>
-                  )}
+                  {/* Tier-based Pricing Settings */}
+                  {deliverySettings.pricing_mode === 'tier' && (
+                    <div className="space-y-3">
+                      <p className="text-sm text-gray-600">
+                        กำหนดค่าส่งตามช่วงระยะทาง (กิโลเมตร) จากร้านถึงลูกค้า
+                      </p>
 
-                  {deliveryRates.length === 0 && (
-                    <p className="text-sm text-gray-500 mt-3 italic">
-                      ยังไม่มีการกำหนดค่าส่ง กรุณาเพิ่มอัตราค่าส่งเพื่อให้ลูกค้าเห็นค่าส่งเมื่อสั่ง Delivery
-                    </p>
+                      {/* Delivery Rates List */}
+                      {deliveryRates.length > 0 && (
+                        <div className="space-y-2 mb-4">
+                          {deliveryRates.sort((a, b) => a.distance_km - b.distance_km).map((rate) => (
+                            <div key={rate.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                              {editingRate?.id === rate.id ? (
+                                <>
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="number"
+                                        value={editingRate.distance_km}
+                                        onChange={(e) => setEditingRate({...editingRate, distance_km: parseFloat(e.target.value) || 0})}
+                                        className="w-20 px-2 py-1 border rounded text-center text-gray-900 bg-white"
+                                        step="0.5"
+                                        min="0"
+                                      />
+                                      <span className="text-sm text-gray-500">km</span>
+                                    </div>
+                                    <span className="text-gray-400">=</span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-sm text-gray-500">$</span>
+                                      <input
+                                        type="number"
+                                        value={editingRate.price}
+                                        onChange={(e) => setEditingRate({...editingRate, price: parseFloat(e.target.value) || 0})}
+                                        className="w-20 px-2 py-1 border rounded text-center text-gray-900 bg-white"
+                                        step="0.5"
+                                        min="0"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setDeliveryRates(deliveryRates.map(r => r.id === editingRate.id ? editingRate : r));
+                                        setEditingRate(null);
+                                      }}
+                                      className="p-1 text-green-600 hover:bg-green-100 rounded"
+                                    >
+                                      <Save className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => setEditingRate(null)}
+                                      className="p-1 text-gray-500 hover:bg-gray-100 rounded"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-sm font-medium text-gray-700">
+                                      ระยะทางไม่เกิน <span className="text-green-600 font-bold">{rate.distance_km}</span> km
+                                    </span>
+                                    <span className="text-gray-400">=</span>
+                                    <span className="text-sm font-bold text-green-600">
+                                      ${rate.price.toFixed(2)}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => setEditingRate(rate)}
+                                      className="p-1 text-blue-600 hover:bg-blue-100 rounded"
+                                    >
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => setDeliveryRates(deliveryRates.filter(r => r.id !== rate.id))}
+                                      className="p-1 text-red-600 hover:bg-red-100 rounded"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Add New Rate Form */}
+                      {showAddRate ? (
+                        <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-dashed border-green-300">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={newRate.distance_km}
+                              onChange={(e) => setNewRate({...newRate, distance_km: e.target.value})}
+                              placeholder="5"
+                              className="w-20 px-2 py-1 border rounded text-center text-gray-900 bg-white"
+                              step="0.5"
+                              min="0"
+                            />
+                            <span className="text-sm text-gray-500">km</span>
+                          </div>
+                          <span className="text-gray-400">=</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm text-gray-500">$</span>
+                            <input
+                              type="number"
+                              value={newRate.price}
+                              onChange={(e) => setNewRate({...newRate, price: e.target.value})}
+                              placeholder="3.50"
+                              className="w-20 px-2 py-1 border rounded text-center text-gray-900 bg-white"
+                              step="0.5"
+                              min="0"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 ml-auto">
+                            <button
+                              onClick={() => {
+                                if (newRate.distance_km && newRate.price) {
+                                  setDeliveryRates([...deliveryRates, {
+                                    id: crypto.randomUUID(),
+                                    distance_km: parseFloat(newRate.distance_km),
+                                    price: parseFloat(newRate.price)
+                                  }]);
+                                  setNewRate({ distance_km: '', price: '' });
+                                  setShowAddRate(false);
+                                }
+                              }}
+                              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                            >
+                              เพิ่ม
+                            </button>
+                            <button
+                              onClick={() => {
+                                setNewRate({ distance_km: '', price: '' });
+                                setShowAddRate(false);
+                              }}
+                              className="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300"
+                            >
+                              ยกเลิก
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowAddRate(true)}
+                          className="flex items-center gap-2 px-4 py-2 text-green-600 border border-green-300 rounded-lg hover:bg-green-50 transition-colors"
+                        >
+                          <Plus className="w-4 h-4" />
+                          เพิ่มอัตราค่าส่ง
+                        </button>
+                      )}
+
+                      {deliveryRates.length === 0 && (
+                        <p className="text-sm text-gray-500 mt-3 italic">
+                          ยังไม่มีการกำหนดค่าส่ง กรุณาเพิ่มอัตราค่าส่งเพื่อให้ลูกค้าเห็นค่าส่งเมื่อสั่ง Delivery
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}

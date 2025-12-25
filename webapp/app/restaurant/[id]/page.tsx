@@ -8,6 +8,7 @@ import GridView from './templates/GridView';
 import MagazineStyle from './templates/MagazineStyle';
 import Elegant from './templates/Elegant';
 import Casual from './templates/Casual';
+import MobileMenuSection from './templates/MobileMenuSection';
 
 interface MenuItem {
   menu_id: string;
@@ -41,6 +42,14 @@ interface DeliveryRate {
   price: number;
 }
 
+interface DeliverySettings {
+  pricing_mode: 'tier' | 'per_km';
+  price_per_km: number;
+  base_fee: number;
+  max_distance_km: number;
+  free_delivery_above: number;
+}
+
 export default function RestaurantMenuPage() {
   const params = useParams();
   const router = useRouter();
@@ -69,6 +78,15 @@ export default function RestaurantMenuPage() {
   // Delivery rates from restaurant settings
   const [deliveryRates, setDeliveryRates] = useState<DeliveryRate[]>([]);
   const [selectedDeliveryFee, setSelectedDeliveryFee] = useState<number>(0);
+
+  // Delivery settings (per-km pricing)
+  const [deliverySettings, setDeliverySettings] = useState<DeliverySettings>({
+    pricing_mode: 'per_km',
+    price_per_km: 1.50,
+    base_fee: 3.00,
+    max_distance_km: 15,
+    free_delivery_above: 0
+  });
 
   // Restaurant location for delivery calculation
   const [restaurantLocation, setRestaurantLocation] = useState<{
@@ -198,6 +216,11 @@ export default function RestaurantMenuPage() {
           setSelectedDeliveryFee(sortedRates[0].price);
         }
 
+        // Set delivery settings (per-km pricing)
+        if (data.delivery_settings) {
+          setDeliverySettings(data.delivery_settings);
+        }
+
         // Set restaurant plan for language restrictions
         if (data.plan) {
           setRestaurantPlan(data.plan);
@@ -286,24 +309,16 @@ export default function RestaurantMenuPage() {
   // Calculate delivery fee based on customer address
   const calculateDeliveryFee = async () => {
     if (!customerDetails.address.trim()) {
-      setDeliveryCalculation({
-        success: false,
-        error: 'Please enter your delivery address'
-      });
+      setDeliveryCalculation(null);
       return;
     }
 
     if (!restaurantLocation.latitude || !restaurantLocation.longitude) {
-      // Restaurant hasn't set their location - fall back to manual selection
-      setDeliveryCalculation({
-        success: false,
-        error: 'Restaurant location not configured. Please select delivery distance manually.'
-      });
+      // Restaurant hasn't set their location - can't calculate automatically
       return;
     }
 
     setCalculatingDelivery(true);
-    setDeliveryCalculation(null);
 
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -312,26 +327,22 @@ export default function RestaurantMenuPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           restaurant_id: restaurantId,
-          customer_address: customerDetails.address,
-          delivery_rates: deliveryRates.map(rate => ({
-            distance_km: rate.distance_km,
-            price: rate.price
-          }))
+          customer_address: customerDetails.address
         })
       });
 
       const data = await response.json();
 
-      if (data.success) {
+      if (data.success !== false) {
         setDeliveryCalculation({
           success: true,
-          distance_km: data.distance?.km,
-          distance_text: data.distance?.text,
-          duration_minutes: data.duration?.minutes,
-          duration_text: data.duration?.text,
+          distance_km: data.distance_km,
+          distance_text: data.distance_text,
+          duration_minutes: data.duration_minutes,
+          duration_text: data.duration_text,
           delivery_fee: data.delivery_fee,
           is_within_range: data.is_within_range,
-          formatted_address: data.customer_location?.formatted_address,
+          formatted_address: data.formatted_address,
           message: data.message
         });
 
@@ -355,6 +366,23 @@ export default function RestaurantMenuPage() {
       setCalculatingDelivery(false);
     }
   };
+
+  // Auto-calculate delivery fee when address changes (debounced)
+  useEffect(() => {
+    if (serviceType !== 'delivery') return;
+    if (!customerDetails.address.trim()) {
+      setDeliveryCalculation(null);
+      return;
+    }
+    if (!restaurantLocation.latitude || !restaurantLocation.longitude) return;
+
+    // Debounce: wait 800ms after user stops typing
+    const timeoutId = setTimeout(() => {
+      calculateDeliveryFee();
+    }, 800);
+
+    return () => clearTimeout(timeoutId);
+  }, [customerDetails.address, serviceType, restaurantLocation.latitude, restaurantLocation.longitude, restaurantId]);
 
   // Helper function to generate a simple hash for cache invalidation detection
   const generateSourceHash = (menu: MenuItem): string => {
@@ -1115,47 +1143,60 @@ export default function RestaurantMenuPage() {
           </div>
         ) : (
           <>
-            {menuTemplate === 'list' && (
-              <ClassicList
-                menus={menus}
-                groupedMenus={groupedMenus}
-                themeColor={themeColor}
-                onItemClick={openItemModal}
-              />
-            )}
-            {menuTemplate === 'grid' && (
-              <GridView
-                menus={menus}
-                groupedMenus={groupedMenus}
-                themeColor={themeColor}
-                onItemClick={openItemModal}
-                selectedLanguage={selectedLanguage}
-              />
-            )}
-            {menuTemplate === 'magazine' && (
-              <MagazineStyle
-                menus={menus}
-                groupedMenus={groupedMenus}
-                themeColor={themeColor}
-                onItemClick={openItemModal}
-              />
-            )}
-            {menuTemplate === 'elegant' && (
-              <Elegant
-                menus={menus}
-                groupedMenus={groupedMenus}
-                themeColor={themeColor}
-                onItemClick={openItemModal}
-              />
-            )}
-            {menuTemplate === 'casual' && (
-              <Casual
-                menus={menus}
-                groupedMenus={groupedMenus}
-                themeColor={themeColor}
-                onItemClick={openItemModal}
-              />
-            )}
+            {/* Mobile Menu - Show slider with 2 items per category */}
+            <MobileMenuSection
+              categories={Object.keys(groupedMenus)}
+              groupedMenus={groupedMenus}
+              themeColor={themeColor}
+              onItemClick={openItemModal}
+              selectedLanguage={selectedLanguage}
+              itemsPerCategory={2}
+            />
+
+            {/* Desktop Menu - Show full templates */}
+            <div className="hidden md:block">
+              {menuTemplate === 'list' && (
+                <ClassicList
+                  menus={menus}
+                  groupedMenus={groupedMenus}
+                  themeColor={themeColor}
+                  onItemClick={openItemModal}
+                />
+              )}
+              {menuTemplate === 'grid' && (
+                <GridView
+                  menus={menus}
+                  groupedMenus={groupedMenus}
+                  themeColor={themeColor}
+                  onItemClick={openItemModal}
+                  selectedLanguage={selectedLanguage}
+                />
+              )}
+              {menuTemplate === 'magazine' && (
+                <MagazineStyle
+                  menus={menus}
+                  groupedMenus={groupedMenus}
+                  themeColor={themeColor}
+                  onItemClick={openItemModal}
+                />
+              )}
+              {menuTemplate === 'elegant' && (
+                <Elegant
+                  menus={menus}
+                  groupedMenus={groupedMenus}
+                  themeColor={themeColor}
+                  onItemClick={openItemModal}
+                />
+              )}
+              {menuTemplate === 'casual' && (
+                <Casual
+                  menus={menus}
+                  groupedMenus={groupedMenus}
+                  themeColor={themeColor}
+                  onItemClick={openItemModal}
+                />
+              )}
+            </div>
           </>
         )}
       </div>
@@ -1535,38 +1576,28 @@ export default function RestaurantMenuPage() {
                             value={customerDetails.address}
                             onChange={(e) => {
                               setCustomerDetails({ ...customerDetails, address: e.target.value });
-                              // Reset calculation when address changes
-                              setDeliveryCalculation(null);
                             }}
                             placeholder="123 Main Street, Auckland 1010"
                             rows={3}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none text-gray-900 bg-white resize-none"
                           />
-                        </div>
-
-                        {/* Calculate Delivery Fee Button */}
-                        {restaurantLocation.latitude && restaurantLocation.longitude && deliveryRates.length > 0 && (
-                          <div>
-                            <button
-                              onClick={calculateDeliveryFee}
-                              disabled={calculatingDelivery || !customerDetails.address.trim()}
-                              className="w-full py-2 px-4 rounded-lg font-medium text-white transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                              style={{ backgroundColor: themeColor }}
-                            >
+                          {/* Auto-calculating delivery fee indicator */}
+                          {restaurantLocation.latitude && restaurantLocation.longitude && customerDetails.address.trim() && (
+                            <div className="flex items-center gap-2 mt-2 text-sm">
                               {calculatingDelivery ? (
                                 <>
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                  Calculating...
+                                  <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
+                                  <span className="text-gray-600">Calculating delivery fee...</span>
                                 </>
-                              ) : (
+                              ) : deliveryCalculation?.success && deliveryCalculation.is_within_range ? (
                                 <>
-                                  <MapPin className="w-4 h-4" />
-                                  Calculate Delivery Fee
+                                  <Check className="w-4 h-4 text-green-500" />
+                                  <span className="text-green-600">Delivery available</span>
                                 </>
-                              )}
-                            </button>
-                          </div>
-                        )}
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
 
                         {/* Delivery Calculation Result */}
                         {deliveryCalculation && (
