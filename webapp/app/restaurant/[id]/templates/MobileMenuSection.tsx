@@ -103,12 +103,12 @@ export default function MobileMenuSection({
               </div>
 
               {/* Horizontal Scroll Container */}
-              <div className="relative">
-                {/* Left Arrow */}
+              <div className="relative group">
+                {/* Left Arrow - Always visible when scrollable */}
                 {items.length > itemsPerCategory && (
                   <button
                     onClick={() => scroll(category, 'left')}
-                    className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 bg-white/90 rounded-full shadow-lg flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                    className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center border border-gray-200"
                     style={{ marginLeft: '-4px' }}
                   >
                     <ChevronLeft className="w-5 h-5 text-gray-600" />
@@ -118,7 +118,7 @@ export default function MobileMenuSection({
                 {/* Items Container */}
                 <div
                   ref={(el) => { scrollRefs.current[category] = el; }}
-                  className="flex gap-3 overflow-x-auto scrollbar-hide pb-2"
+                  className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 px-1"
                   style={{ scrollSnapType: 'x mandatory' }}
                 >
                   {items.slice(0, Math.max(itemsPerCategory + 1, items.length)).map((item, idx) => (
@@ -185,15 +185,20 @@ export default function MobileMenuSection({
                   ))}
                 </div>
 
-                {/* Right Arrow */}
+                {/* Right Arrow - Always visible when scrollable */}
                 {items.length > itemsPerCategory && (
                   <button
                     onClick={() => scroll(category, 'right')}
-                    className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 bg-white/90 rounded-full shadow-lg flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center border border-gray-200 animate-pulse-subtle"
                     style={{ marginRight: '-4px' }}
                   >
                     <ChevronRight className="w-5 h-5 text-gray-600" />
                   </button>
+                )}
+
+                {/* Scroll hint gradient overlay */}
+                {items.length > itemsPerCategory && (
+                  <div className="absolute right-0 top-0 bottom-2 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none" />
                 )}
               </div>
             </div>
@@ -387,7 +392,7 @@ export default function MobileMenuSection({
         </div>
       )}
 
-      {/* CSS for hiding scrollbar */}
+      {/* CSS for hiding scrollbar and animations */}
       <style jsx global>{`
         .scrollbar-hide {
           -ms-overflow-style: none;
@@ -395,6 +400,19 @@ export default function MobileMenuSection({
         }
         .scrollbar-hide::-webkit-scrollbar {
           display: none;
+        }
+        @keyframes pulse-subtle {
+          0%, 100% {
+            opacity: 1;
+            transform: translateY(-50%) scale(1);
+          }
+          50% {
+            opacity: 0.8;
+            transform: translateY(-50%) scale(1.05);
+          }
+        }
+        .animate-pulse-subtle {
+          animation: pulse-subtle 2s ease-in-out infinite;
         }
       `}</style>
     </>
