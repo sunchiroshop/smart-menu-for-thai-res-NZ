@@ -1660,19 +1660,21 @@ async def upload_payment_slip(request: UploadPaymentSlipRequest):
         # Decode base64 image
         image_data = base64.b64decode(request.slip_image_base64)
 
-        # Upload to Supabase Storage
-        from services.supabase_client import supabase_client
+        # Upload to Supabase Storage using ai_service's supabase client
+        if not ai_service.supabase_client:
+            raise HTTPException(status_code=500, detail="Storage not available")
+
         file_path = f"payment-slips/{request.order_id}.jpg"
 
         # Upload image
-        result = supabase_client.client.storage.from_("payment-slips").upload(
+        result = ai_service.supabase_client.storage.from_("payment-slips").upload(
             file_path,
             image_data,
             {"content-type": "image/jpeg", "upsert": "true"}
         )
 
         # Get public URL
-        public_url = supabase_client.client.storage.from_("payment-slips").get_public_url(file_path)
+        public_url = ai_service.supabase_client.storage.from_("payment-slips").get_public_url(file_path)
 
         # Update order with slip URL
         orders_service.update_order(
@@ -1762,9 +1764,11 @@ async def update_payment_settings(restaurant_id: str, request: UpdatePaymentSett
                 detail="At least one payment method must be enabled"
             )
 
-        # Save to database
-        from services.supabase_client import supabase_client
-        result = supabase_client.client.table("restaurants").update({
+        # Save to database using restaurant_service's supabase client
+        if not restaurant_service.supabase_client:
+            raise HTTPException(status_code=500, detail="Database connection not available")
+
+        result = restaurant_service.supabase_client.table("restaurants").update({
             "payment_settings": current_settings
         }).eq("id", restaurant_id).execute()
 
