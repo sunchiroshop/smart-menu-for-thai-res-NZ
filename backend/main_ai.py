@@ -33,6 +33,25 @@ from services.staff_service import staff_service  # Staff Management
 from services.image_library_service import image_library_service  # Shared Image Library
 from services.delivery_service import delivery_service  # Delivery distance calculation
 
+# Initialize Supabase client for direct database access (menu_translations, etc.)
+try:
+    from supabase import create_client, Client
+    SUPABASE_URL = os.getenv('SUPABASE_URL') or os.getenv('NEXT_PUBLIC_SUPABASE_URL')
+    SUPABASE_KEY = (
+        os.getenv('SUPABASE_SERVICE_ROLE_KEY') or
+        os.getenv('SUPABASE_KEY') or
+        os.getenv('NEXT_PUBLIC_SUPABASE_ANON_KEY')
+    )
+    if SUPABASE_URL and SUPABASE_KEY:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("✅ Supabase client initialized for main_ai.py")
+    else:
+        supabase = None
+        print("⚠️ Supabase credentials not found for main_ai.py")
+except Exception as e:
+    supabase = None
+    print(f"⚠️ Failed to initialize Supabase client: {str(e)}")
+
 # Lifespan handler for graceful startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -475,16 +494,18 @@ async def save_menu_translations(request: SaveMenuTranslationsRequest):
         saved_count = 0
         for trans in request.translations:
             try:
-                # Upsert translation
+                # Upsert translation - support both field naming conventions
+                # Frontend sends: translated_name, translated_description, etc.
+                # Also support: name, description (for backwards compatibility)
                 data = {
                     "restaurant_id": actual_restaurant_id,
                     "menu_id": trans.get("menu_id"),
                     "language_code": request.language_code,
-                    "translated_name": trans.get("name"),
-                    "translated_description": trans.get("description"),
-                    "translated_category": trans.get("category"),
-                    "translated_meats": trans.get("meats", []),
-                    "translated_addons": trans.get("addons", []),
+                    "translated_name": trans.get("translated_name") or trans.get("name"),
+                    "translated_description": trans.get("translated_description") or trans.get("description"),
+                    "translated_category": trans.get("translated_category") or trans.get("category"),
+                    "translated_meats": trans.get("translated_meats") or trans.get("meats", []),
+                    "translated_addons": trans.get("translated_addons") or trans.get("addons", []),
                     "source_hash": trans.get("source_hash"),
                     "updated_at": "now()"
                 }
@@ -2242,6 +2263,7 @@ async def get_user_profile(
                 "menu_template": restaurant.get("menu_template", "grid"),
                 "service_options": service_options,
                 "primary_language": restaurant.get("primary_language", "th"),
+                "pos_theme_color": restaurant.get("pos_theme_color", "orange"),
                 "delivery_rates": restaurant.get("delivery_rates") or []
             }
         else:
@@ -2438,6 +2460,7 @@ class UpdateServiceOptionsRequest(BaseModel):
     user_id: str
     service_options: Dict[str, bool]  # {"dine_in": true, "pickup": false, "delivery": true}
     primary_language: Optional[str] = None  # 'th', 'en', 'zh', 'ja', 'ko', etc.
+    pos_theme_color: Optional[str] = None  # 'orange', 'blue', 'green', 'purple', 'red', 'teal', 'amber', 'pink'
     delivery_rates: Optional[List[DeliveryRateItem]] = None  # [{"id": "uuid", "distance_km": 5, "price": 3.50}]
     delivery_settings: Optional[DeliverySettingsItem] = None  # Per-km pricing settings
 
@@ -2473,10 +2496,20 @@ async def update_service_options(request: UpdateServiceOptionsRequest):
                 detail=f"Invalid primary_language: {request.primary_language}. Valid: {valid_languages}"
             )
 
+        # Validate pos_theme_color if provided
+        valid_themes = ['orange', 'blue', 'green', 'purple', 'red', 'teal', 'amber', 'pink']
+        if request.pos_theme_color and request.pos_theme_color not in valid_themes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid pos_theme_color: {request.pos_theme_color}. Valid: {valid_themes}"
+            )
+
         # Update in database
         update_data = {"service_options": request.service_options}
         if request.primary_language:
             update_data["primary_language"] = request.primary_language
+        if request.pos_theme_color:
+            update_data["pos_theme_color"] = request.pos_theme_color
         if request.delivery_rates is not None:
             # Convert to list of dicts for JSON storage
             update_data["delivery_rates"] = [rate.model_dump() for rate in request.delivery_rates]
@@ -2497,13 +2530,14 @@ async def update_service_options(request: UpdateServiceOptionsRequest):
             )
 
         delivery_rates_count = len(request.delivery_rates) if request.delivery_rates else 0
-        print(f"✅ Service options updated for restaurant {request.restaurant_id}: {request.service_options}, language: {request.primary_language}, delivery_rates: {delivery_rates_count} tiers, delivery_settings: {request.delivery_settings}")
+        print(f"✅ Service options updated for restaurant {request.restaurant_id}: {request.service_options}, language: {request.primary_language}, pos_theme: {request.pos_theme_color}, delivery_rates: {delivery_rates_count} tiers")
 
         return {
             "success": True,
             "restaurant_id": request.restaurant_id,
             "service_options": request.service_options,
             "primary_language": request.primary_language,
+            "pos_theme_color": request.pos_theme_color,
             "delivery_rates": [rate.model_dump() for rate in request.delivery_rates] if request.delivery_rates else [],
             "delivery_settings": request.delivery_settings.model_dump() if request.delivery_settings else None,
             "message": "Service options updated successfully"
@@ -2799,6 +2833,7 @@ async def get_public_menu(restaurant_id: str):
             "name": restaurant.get("name"),
             "menu_template": restaurant.get("menu_template", "grid"),
             "hide_powered_by": is_enterprise,  # Only Enterprise can hide "Powered by Smart Menu"
+            "primary_language": restaurant.get("primary_language", "en"),  # Default to English for NZ
         }
 
         # Get service options (default all enabled)
@@ -2953,6 +2988,55 @@ async def get_orders(restaurant_id: str, status: Optional[str] = None):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/api/orders/summary", summary="Get Orders Summary with Filters")
+async def get_orders_summary(
+    restaurant_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    payment_status: Optional[str] = None,
+    service_type: Optional[str] = None
+):
+    """
+    ดึงสรุป Orders พร้อม Filter สำหรับหน้า Dashboard
+
+    Args:
+        restaurant_id: Restaurant ID
+        start_date: Start date (YYYY-MM-DD format)
+        end_date: End date (YYYY-MM-DD format)
+        payment_status: Filter by payment status (pending, paid, failed)
+        service_type: Filter by service type (dine_in, pickup, delivery)
+
+    Returns:
+        Dictionary with orders list and summary statistics
+    """
+    try:
+        result = orders_service.get_orders_summary(
+            restaurant_id=restaurant_id,
+            start_date=start_date,
+            end_date=end_date,
+            payment_status=payment_status,
+            service_type=service_type
+        )
+
+        return {
+            "success": True,
+            "orders": result["orders"],
+            "summary": result["summary"],
+            "filters": {
+                "start_date": start_date,
+                "end_date": end_date,
+                "payment_status": payment_status,
+                "service_type": service_type
+            }
+        }
+    except Exception as e:
+        print(f"❌ Get orders summary error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class UpdateOrderStatusRequest(BaseModel):
     status: str
 
@@ -2986,6 +3070,322 @@ async def update_order_status(order_id: str, request: UpdateOrderStatusRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================
+# Pay at Counter API (for Dine-in orders)
+# ============================================================
+
+class PayAtCounterRequest(BaseModel):
+    payment_method: str = "cash_at_counter"
+
+@app.post("/api/orders/{order_id}/pay-at-counter", summary="Confirm Pay at Counter")
+async def pay_at_counter(order_id: str, request: PayAtCounterRequest):
+    """
+    ยืนยันการจ่ายเงินที่เค้าท์เตอร์สำหรับ Dine-in orders
+
+    Order จะถูกส่งไปครัวและสถานะการจ่ายจะเป็น pending
+    ลูกค้าจ่ายเงินที่แคชเชียร์หลังจากทานอาหารเสร็จ
+
+    Args:
+        order_id: Order ID
+        payment_method: Payment method (default: cash_at_counter)
+
+    Returns:
+        Dictionary with updated order
+    """
+    try:
+        # Get order
+        order = orders_service.get_order_by_id(order_id)
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # Verify it's a dine-in order
+        if order.get("service_type") != "dine_in":
+            raise HTTPException(status_code=400, detail="Pay at counter is only available for dine-in orders")
+
+        # Update order with payment method and confirm for kitchen
+        update_data = {
+            "payment_method": request.payment_method,
+            "payment_status": "pending",  # Will be marked as paid when customer pays at counter
+            "status": "confirmed"  # Send to kitchen immediately
+        }
+
+        updated_order = orders_service.update_order(order_id, update_data)
+
+        if not updated_order:
+            raise HTTPException(status_code=500, detail="Failed to update order")
+
+        return {
+            "success": True,
+            "message": "Order confirmed. Please pay at the counter.",
+            "order": updated_order
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Pay at counter error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Void Order API (for Cashier)
+# ============================================================
+
+class VoidOrderRequest(BaseModel):
+    void_reason: str
+    voided_by: Optional[str] = None  # Staff ID
+
+@app.post("/api/orders/{order_id}/void", summary="Void Order")
+async def void_order(order_id: str, request: VoidOrderRequest):
+    """
+    Void/Cancel an order (for Cashier)
+
+    Args:
+        order_id: Order ID
+        void_reason: Reason for voiding
+        voided_by: Staff ID who voided (optional)
+
+    Returns:
+        Dictionary with voided order
+    """
+    try:
+        # Get order
+        order = orders_service.get_order_by_id(order_id)
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # Check if already voided
+        if order.get("is_voided"):
+            raise HTTPException(status_code=400, detail="Order is already voided")
+
+        # Update order to void
+        update_data = {
+            "is_voided": True,
+            "voided_at": "now()",
+            "void_reason": request.void_reason,
+            "status": "cancelled"
+        }
+
+        if request.voided_by:
+            update_data["voided_by"] = request.voided_by
+
+        updated_order = orders_service.update_order(order_id, update_data)
+
+        if not updated_order:
+            raise HTTPException(status_code=500, detail="Failed to void order")
+
+        return {
+            "success": True,
+            "message": "Order voided successfully",
+            "order": updated_order
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Void order error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Cashier Daily Summary API
+# ============================================================
+
+@app.get("/api/cashier/daily-summary/{restaurant_id}", summary="Get Cashier Daily Summary")
+async def get_cashier_daily_summary(restaurant_id: str, date: Optional[str] = None):
+    """
+    Get daily summary for cashier dashboard
+
+    Args:
+        restaurant_id: Restaurant ID
+        date: Date in YYYY-MM-DD format (default: today)
+
+    Returns:
+        Dictionary with daily summary data
+    """
+    try:
+        # Convert slug to UUID if needed
+        restaurant = restaurant_service.get_restaurant_by_id_or_slug(restaurant_id)
+        if not restaurant:
+            raise HTTPException(status_code=404, detail="Restaurant not found")
+
+        actual_restaurant_id = restaurant.get("id")
+
+        # Use today if no date provided
+        if not date:
+            from datetime import datetime
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        # Get orders for the day
+        start_datetime = f"{date}T00:00:00"
+        end_datetime = f"{date}T23:59:59"
+
+        result = supabase.table("orders").select("*").eq(
+            "restaurant_id", actual_restaurant_id
+        ).gte("created_at", start_datetime).lte("created_at", end_datetime).execute()
+
+        orders = result.data if result.data else []
+
+        # Calculate summary
+        total_orders = len(orders)
+        completed_orders = len([o for o in orders if o.get("status") == "completed"])
+        voided_orders = len([o for o in orders if o.get("is_voided")])
+        pending_payment = len([o for o in orders if o.get("payment_status") == "pending" and not o.get("is_voided")])
+
+        # Calculate revenue by payment method
+        revenue_by_method = {
+            "card": 0,
+            "bank_transfer": 0,
+            "cash_at_counter": 0,
+            "unpaid": 0
+        }
+
+        total_revenue = 0
+
+        for order in orders:
+            if order.get("is_voided"):
+                continue
+
+            amount = float(order.get("total_price", 0))
+            payment_method = order.get("payment_method")
+            payment_status = order.get("payment_status")
+
+            if payment_status == "paid":
+                total_revenue += amount
+                if payment_method in revenue_by_method:
+                    revenue_by_method[payment_method] += amount
+                else:
+                    revenue_by_method["card"] += amount  # Default to card
+            else:
+                revenue_by_method["unpaid"] += amount
+
+        # Get void reasons
+        void_reasons = []
+        for order in orders:
+            if order.get("is_voided") and order.get("void_reason"):
+                void_reasons.append({
+                    "order_id": order.get("id"),
+                    "reason": order.get("void_reason"),
+                    "amount": float(order.get("total_price", 0))
+                })
+
+        return {
+            "success": True,
+            "date": date,
+            "summary": {
+                "total_orders": total_orders,
+                "completed_orders": completed_orders,
+                "voided_orders": voided_orders,
+                "pending_payment": pending_payment,
+                "total_revenue": round(total_revenue, 2),
+                "revenue_by_method": {
+                    k: round(v, 2) for k, v in revenue_by_method.items()
+                },
+                "void_reasons": void_reasons
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Cashier summary error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/cashier/orders/{restaurant_id}", summary="Get Cashier Orders by Filter")
+async def get_cashier_orders(restaurant_id: str, date: Optional[str] = None, filter: str = "all"):
+    """
+    Get orders for cashier dashboard with filter
+
+    Args:
+        restaurant_id: Restaurant ID
+        date: Date in YYYY-MM-DD format (default: today)
+        filter: Filter type - 'all', 'completed', 'voided', 'pending_payment'
+
+    Returns:
+        List of orders matching the filter
+    """
+    try:
+        # Convert slug to UUID if needed
+        restaurant = restaurant_service.get_restaurant_by_id_or_slug(restaurant_id)
+        if not restaurant:
+            raise HTTPException(status_code=404, detail="Restaurant not found")
+
+        actual_restaurant_id = restaurant.get("id")
+
+        # Use today if no date provided
+        if not date:
+            from datetime import datetime
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        # Get orders for the day
+        start_datetime = f"{date}T00:00:00"
+        end_datetime = f"{date}T23:59:59"
+
+        result = supabase.table("orders").select("*").eq(
+            "restaurant_id", actual_restaurant_id
+        ).gte("created_at", start_datetime).lte("created_at", end_datetime).order(
+            "created_at", desc=True
+        ).execute()
+
+        orders = result.data if result.data else []
+
+        # Filter orders based on filter type
+        filtered_orders = []
+        for order in orders:
+            include_order = False
+
+            if filter == "all":
+                include_order = True
+            elif filter == "completed":
+                include_order = order.get("status") == "completed" and not order.get("is_voided")
+            elif filter == "voided":
+                include_order = order.get("is_voided") == True
+            elif filter == "pending_payment":
+                include_order = order.get("payment_status") == "pending" and not order.get("is_voided")
+
+            if include_order:
+                # Parse items from JSON string if needed
+                items = order.get("items", [])
+                if isinstance(items, str):
+                    import json
+                    try:
+                        items = json.loads(items)
+                    except:
+                        items = []
+
+                filtered_orders.append({
+                    "id": order.get("id"),
+                    "table_no": order.get("table_no"),
+                    "customer_name": order.get("customer_name"),
+                    "service_type": order.get("service_type"),
+                    "status": "voided" if order.get("is_voided") else order.get("status"),
+                    "payment_status": order.get("payment_status"),
+                    "payment_method": order.get("payment_method"),
+                    "total_price": float(order.get("total_price", 0)),
+                    "created_at": order.get("created_at"),
+                    "items": items,
+                    "void_reason": order.get("void_reason") if order.get("is_voided") else None
+                })
+
+        return {
+            "success": True,
+            "date": date,
+            "filter": filter,
+            "orders": filtered_orders
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Cashier orders error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ============================================================
 # Service Requests API (Call Waiter, Request Sauce, etc.)
@@ -3713,6 +4113,48 @@ async def create_restaurant(request: Dict[str, Any]):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/restaurant/{restaurant_id}", summary="Get Restaurant by ID")
+async def get_restaurant(restaurant_id: str):
+    """
+    ดึงข้อมูลร้านอาหารจาก ID หรือ slug
+
+    Args:
+        restaurant_id: Restaurant ID (UUID) หรือ slug
+
+    Returns:
+        Restaurant data including slug
+    """
+    try:
+        restaurant = restaurant_service.get_restaurant_by_id_or_slug(restaurant_id)
+
+        if not restaurant:
+            raise HTTPException(status_code=404, detail="Restaurant not found")
+
+        return {
+            "success": True,
+            "restaurant": {
+                "id": restaurant.get("id"),
+                "name": restaurant.get("name"),
+                "slug": restaurant.get("slug"),
+                "phone": restaurant.get("phone"),
+                "email": restaurant.get("email"),
+                "address": restaurant.get("address"),
+                "logo_url": restaurant.get("logo_url"),
+                "theme_color": restaurant.get("theme_color"),
+                "cover_image_url": restaurant.get("cover_image_url"),
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Get restaurant error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.put("/api/restaurant/{restaurant_id}", summary="Update Restaurant")
 async def update_restaurant(restaurant_id: str, request: Dict[str, Any]):

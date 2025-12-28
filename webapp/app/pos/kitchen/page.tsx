@@ -5,10 +5,13 @@ import { useRouter } from 'next/navigation';
 import {
   ChefHat, Bell, Volume2, VolumeX, Clock, CheckCircle,
   AlertTriangle, LogOut, RefreshCw, Loader2, Timer,
-  Utensils, Coffee, Users
+  Utensils, Coffee, Users, XCircle, X
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
-import { t, mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
+import { t, tBilingual, mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
+import { getThemeClasses, POSTheme } from '@/lib/pos-theme';
+import BilingualText, { BilingualTextInline } from '@/components/BilingualText';
+import POSNavbar from '@/components/POSNavbar';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -76,6 +79,16 @@ export default function KitchenDisplayPage() {
   const [translatedTexts, setTranslatedTexts] = useState<Record<string, string>>({});
   const [lang, setLang] = useState<POSLanguage>('th');
 
+  // Theme state
+  const [posTheme, setPosTheme] = useState<POSTheme>('orange');
+  const themeClasses = getThemeClasses(posTheme);
+
+  // Void order states
+  const [showVoidModal, setShowVoidModal] = useState(false);
+  const [voidingOrder, setVoidingOrder] = useState<Order | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidLoading, setVoidLoading] = useState(false);
+
   // Check session
   useEffect(() => {
     const savedSession = localStorage.getItem('pos_session');
@@ -107,33 +120,15 @@ export default function KitchenDisplayPage() {
     return () => clearInterval(timer);
   }, []);
 
-  // Create audio context for Web Audio API fallback
+  // Create audio context for Web Audio API
   const audioContextRef = useRef<AudioContext | null>(null);
 
-  // Initialize audio
+  // Initialize audio - Use Web Audio API directly (no external file needed)
   useEffect(() => {
-    // Try to load mp3 file, fallback to Web Audio API
-    const audio = new Audio('/sounds/notification.mp3');
-    audio.volume = volume / 100;
-
-    // Test if audio can be loaded
-    audio.addEventListener('canplaythrough', () => {
-      audioRef.current = audio;
-    });
-
-    audio.addEventListener('error', () => {
-      // Fallback: Use Web Audio API
-      console.log('Using Web Audio API fallback for notifications');
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    });
-
-    audio.load();
+    // Use Web Audio API for notification sounds
+    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
 
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
       if (audioContextRef.current) {
         audioContextRef.current.close();
         audioContextRef.current = null;
@@ -191,16 +186,7 @@ export default function KitchenDisplayPage() {
   // Play notification
   const playNotification = useCallback(() => {
     if (soundEnabled) {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(() => {
-          // If mp3 fails, use Web Audio API
-          playWebAudioNotification();
-        });
-      } else {
-        // No mp3 loaded, use Web Audio API
-        playWebAudioNotification();
-      }
+      playWebAudioNotification();
     }
     if (vibrationEnabled && 'vibrate' in navigator) {
       navigator.vibrate([200, 100, 200]);
@@ -226,14 +212,14 @@ export default function KitchenDisplayPage() {
     }
   }, [session?.restaurantId]);
 
-  // Fetch restaurant settings (primary language)
+  // Fetch restaurant settings (primary language and theme)
   const fetchRestaurantSettings = useCallback(async () => {
     if (!session?.restaurantId) return;
 
     try {
       const { data, error } = await supabase
         .from('restaurants')
-        .select('primary_language')
+        .select('primary_language, pos_theme_color')
         .eq('id', session.restaurantId)
         .single();
 
@@ -242,6 +228,9 @@ export default function KitchenDisplayPage() {
         // Sync UI language with database setting
         const posLang = mapToPOSLanguage(data.primary_language);
         setLang(posLang);
+      }
+      if (data?.pos_theme_color) {
+        setPosTheme(data.pos_theme_color as POSTheme);
       }
     } catch (error) {
       console.error('Failed to fetch restaurant settings:', error);
@@ -326,6 +315,9 @@ export default function KitchenDisplayPage() {
             setPrimaryLanguage(newLang);
             setLang(mapToPOSLanguage(newLang));
           }
+          if (payload.new && (payload.new as any).pos_theme_color) {
+            setPosTheme((payload.new as any).pos_theme_color as POSTheme);
+          }
         }
       )
       .subscribe();
@@ -395,6 +387,45 @@ export default function KitchenDisplayPage() {
     }
   };
 
+  // Void order
+  const handleVoidOrder = async () => {
+    if (!voidingOrder || !voidReason.trim()) return;
+
+    setVoidLoading(true);
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/orders/${voidingOrder.id}/void`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: voidReason,
+          voided_by: session?.staffId
+        })
+      });
+
+      if (response.ok) {
+        setOrders((prev) => prev.filter((o) => o.id !== voidingOrder.id));
+        setShowVoidModal(false);
+        setVoidingOrder(null);
+        setVoidReason('');
+      } else {
+        const data = await response.json();
+        alert(data.detail || 'Failed to void order');
+      }
+    } catch (error) {
+      console.error('Failed to void order:', error);
+      alert('Failed to void order');
+    } finally {
+      setVoidLoading(false);
+    }
+  };
+
+  // Open void modal
+  const openVoidModal = (order: Order) => {
+    setVoidingOrder(order);
+    setVoidReason('');
+    setShowVoidModal(true);
+  };
+
   // Logout
   const handleLogout = () => {
     localStorage.removeItem('pos_session');
@@ -451,88 +482,57 @@ export default function KitchenDisplayPage() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white">
-      {/* Header */}
-      <header className="bg-slate-800 border-b border-slate-700 px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <ChefHat className="w-8 h-8 text-orange-500" />
-              <div>
-                <h1 className="text-xl font-bold">{t('kitchen', 'title', lang)}</h1>
-                <p className="text-sm text-slate-400">{session.restaurantName}</p>
-              </div>
-            </div>
-          </div>
+      {/* Navigation Bar */}
+      <POSNavbar
+        session={session}
+        currentTime={currentTime}
+        lang={lang}
+        theme={posTheme}
+        soundEnabled={soundEnabled}
+        onSoundToggle={() => setSoundEnabled(!soundEnabled)}
+        volume={volume}
+        onVolumeChange={setVolume}
+        showSoundControls={true}
+      />
 
-          <div className="flex items-center gap-4">
-            {/* Clock */}
-            <div className="text-2xl font-mono text-orange-500">
-              {currentTime.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
-            </div>
-
-            {/* Orders count */}
-            <div className="flex items-center gap-2 px-4 py-2 bg-orange-500/20 rounded-lg">
-              <Utensils className="w-5 h-5 text-orange-500" />
-              <span className="font-bold text-orange-500">{orders.length}</span>
-              <span className="text-slate-400">{lang === 'th' ? 'ออเดอร์' : 'Orders'}</span>
-            </div>
-
-            {/* Sound Toggle */}
-            <button
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`p-2 rounded-lg transition-colors ${
-                soundEnabled ? 'bg-green-500/20 text-green-500' : 'bg-slate-700 text-slate-400'
-              }`}
-              title={soundEnabled ? 'ปิดเสียง' : 'เปิดเสียง'}
-            >
-              {soundEnabled ? <Volume2 className="w-6 h-6" /> : <VolumeX className="w-6 h-6" />}
-            </button>
-
-            {/* Volume Slider */}
-            {soundEnabled && (
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
-                className="w-24 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500"
-              />
-            )}
-
-            {/* Settings */}
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-            >
-              <Bell className="w-6 h-6" />
-            </button>
-
-            {/* Refresh */}
-            <button
-              onClick={fetchOrders}
-              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-              title="รีเฟรช"
-            >
-              <RefreshCw className="w-6 h-6" />
-            </button>
-
-            {/* Logout */}
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-lg transition-colors"
-            >
-              <LogOut className="w-5 h-5" />
-              {t('kitchen', 'logout', lang)}
-            </button>
+      {/* Sub Header - Orders count and controls */}
+      <div className="bg-slate-800 px-4 py-2 flex items-center justify-between border-b border-slate-700">
+        <div className="flex items-center gap-4">
+          {/* Orders count */}
+          <div className={`flex items-center gap-2 px-4 py-2 ${themeClasses.bgLight} rounded-lg`}>
+            <Utensils className={`w-5 h-5 ${themeClasses.textPrimary}`} />
+            <span className={`font-bold ${themeClasses.textPrimary}`}>{orders.length}</span>
+            <span className="text-slate-400">{lang === 'th' ? 'ออเดอร์' : 'Orders'}</span>
           </div>
         </div>
 
-        {/* Settings Panel */}
-        {showSettings && (
-          <div className="mt-4 p-4 bg-slate-700 rounded-xl">
-            <h3 className="font-semibold mb-4">ตั้งค่าการแจ้งเตือน</h3>
-            <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2">
+          {/* Settings */}
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-sm"
+          >
+            <Bell className="w-4 h-4" />
+            <span>{lang === 'th' ? 'ตั้งค่า' : 'Settings'}</span>
+          </button>
+
+          {/* Refresh */}
+          <button
+            onClick={fetchOrders}
+            className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-sm"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>{lang === 'th' ? 'รีเฟรช' : 'Refresh'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Settings Panel */}
+      {showSettings && (
+        <div className="bg-slate-800 px-4 py-3 border-b border-slate-700">
+          <div className="p-4 bg-slate-700 rounded-xl">
+            <h3 className="font-semibold mb-4">{lang === 'th' ? 'ตั้งค่าการแจ้งเตือน' : 'Notification Settings'}</h3>
+            <div className="flex flex-wrap items-center gap-6">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -540,7 +540,7 @@ export default function KitchenDisplayPage() {
                   onChange={(e) => setSoundEnabled(e.target.checked)}
                   className="w-5 h-5 rounded accent-orange-500"
                 />
-                <span>เสียงแจ้งเตือน</span>
+                <span>{lang === 'th' ? 'เสียงแจ้งเตือน' : 'Sound'}</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -549,10 +549,10 @@ export default function KitchenDisplayPage() {
                   onChange={(e) => setVibrationEnabled(e.target.checked)}
                   className="w-5 h-5 rounded accent-orange-500"
                 />
-                <span>สั่นเตือน</span>
+                <span>{lang === 'th' ? 'สั่นเตือน' : 'Vibration'}</span>
               </label>
               <div className="flex items-center gap-2">
-                <span>ระดับเสียง:</span>
+                <span>{lang === 'th' ? 'ระดับเสียง:' : 'Volume:'}</span>
                 <input
                   type="range"
                   min="0"
@@ -565,8 +565,8 @@ export default function KitchenDisplayPage() {
               </div>
             </div>
           </div>
-        )}
-      </header>
+        </div>
+      )}
 
       {/* Orders Grid */}
       <main className="p-4">
@@ -577,8 +577,22 @@ export default function KitchenDisplayPage() {
         ) : orders.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-500">
             <Coffee className="w-16 h-16 mb-4" />
-            <p className="text-xl">{t('kitchen', 'noOrders', lang)}</p>
-            <p className="text-sm mt-2">{lang === 'th' ? 'รอออเดอร์ใหม่...' : 'Waiting for orders...'}</p>
+            <BilingualText
+              category="kitchen"
+              textKey="noOrders"
+              lang={lang}
+              className="items-center"
+              primaryClassName="text-xl"
+              englishClassName="text-sm opacity-60"
+            />
+            <BilingualText
+              category="kitchen"
+              textKey="waitingForOrders"
+              lang={lang}
+              className="items-center mt-2"
+              primaryClassName="text-sm"
+              englishClassName="text-xs opacity-60"
+            />
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -590,7 +604,7 @@ export default function KitchenDisplayPage() {
                 {/* Order Header */}
                 <div className="p-4 bg-slate-700/50 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="text-2xl font-bold text-orange-500">
+                    <div className={`text-2xl font-bold ${themeClasses.textPrimary}`}>
                       {order.table_no ? `T${order.table_no}` : '#'}
                     </div>
                     <div>
@@ -615,7 +629,7 @@ export default function KitchenDisplayPage() {
                     <div key={idx} className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center text-sm font-bold">
+                          <span className={`w-6 h-6 ${themeClasses.bgPrimary} rounded-full flex items-center justify-center text-sm font-bold`}>
                             {item.quantity}
                           </span>
                           <span className="font-medium">{item.name}</span>
@@ -658,20 +672,40 @@ export default function KitchenDisplayPage() {
 
                 {/* Action Buttons */}
                 <div className="p-3 bg-slate-700/30 flex gap-2">
+                  {/* Void Button - always visible for pending/confirmed orders */}
+                  {(order.status === 'pending' || order.status === 'confirmed') && (
+                    <button
+                      onClick={() => openVoidModal(order)}
+                      className="px-3 py-2 bg-red-500 hover:bg-red-600 rounded-lg font-semibold transition-colors flex items-center justify-center"
+                      title={lang === 'th' ? 'ยกเลิกออเดอร์' : 'Void Order'}
+                    >
+                      <XCircle className="w-5 h-5" />
+                    </button>
+                  )}
                   {order.status === 'pending' && (
                     <button
                       onClick={() => updateOrderStatus(order.id, 'confirmed')}
-                      className="flex-1 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold transition-colors"
+                      className="flex-1 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold transition-colors flex items-center justify-center"
                     >
-                      {lang === 'th' ? 'ยืนยัน' : 'Confirm'}
+                      <BilingualTextInline
+                        category="common"
+                        textKey="confirm"
+                        lang={lang}
+                        englishClassName="text-[10px] opacity-80 ml-1"
+                      />
                     </button>
                   )}
                   {order.status === 'confirmed' && (
                     <button
                       onClick={() => updateOrderStatus(order.id, 'preparing')}
-                      className="flex-1 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg font-semibold transition-colors"
+                      className={`flex-1 py-2 ${themeClasses.primaryButton} rounded-lg font-semibold transition-colors flex items-center justify-center`}
                     >
-                      {t('kitchen', 'startCooking', lang)}
+                      <BilingualTextInline
+                        category="kitchen"
+                        textKey="startCooking"
+                        lang={lang}
+                        englishClassName="text-[10px] opacity-80 ml-1"
+                      />
                     </button>
                   )}
                   {order.status === 'preparing' && (
@@ -680,15 +714,25 @@ export default function KitchenDisplayPage() {
                       className="flex-1 py-2 bg-green-500 hover:bg-green-600 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
                     >
                       <CheckCircle className="w-5 h-5" />
-                      {t('kitchen', 'markReady', lang)}
+                      <BilingualTextInline
+                        category="kitchen"
+                        textKey="markReady"
+                        lang={lang}
+                        englishClassName="text-[10px] opacity-80 ml-1"
+                      />
                     </button>
                   )}
                   {order.status === 'ready' && (
                     <button
                       onClick={() => updateOrderStatus(order.id, 'completed')}
-                      className="flex-1 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg font-semibold transition-colors"
+                      className="flex-1 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg font-semibold transition-colors flex items-center justify-center"
                     >
-                      {t('kitchen', 'served', lang)}
+                      <BilingualTextInline
+                        category="kitchen"
+                        textKey="served"
+                        lang={lang}
+                        englishClassName="text-[10px] opacity-80 ml-1"
+                      />
                     </button>
                   )}
                 </div>
@@ -698,8 +742,64 @@ export default function KitchenDisplayPage() {
         )}
       </main>
 
-      {/* Audio element (hidden) */}
-      <audio id="notification-sound" src="/sounds/notification.mp3" preload="auto" />
+      {/* Void Order Modal */}
+      {showVoidModal && voidingOrder && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-xl max-w-md w-full">
+            <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-red-500">
+                {lang === 'th' ? 'ยกเลิกออเดอร์' : 'Void Order'}
+              </h3>
+              <button
+                onClick={() => setShowVoidModal(false)}
+                className="p-1 hover:bg-slate-700 rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4">
+              <p className="text-slate-400 mb-2">
+                {lang === 'th' ? 'ออเดอร์:' : 'Order:'} #{voidingOrder.id.slice(0, 8).toUpperCase()}
+              </p>
+              <p className="text-white mb-4">
+                {lang === 'th' ? 'โต๊ะ:' : 'Table:'} {voidingOrder.table_no || '-'}
+              </p>
+
+              <label className="block text-sm text-slate-400 mb-2">
+                {lang === 'th' ? 'เหตุผลในการยกเลิก *' : 'Void Reason *'}
+              </label>
+              <textarea
+                value={voidReason}
+                onChange={(e) => setVoidReason(e.target.value)}
+                placeholder={lang === 'th' ? 'กรุณาระบุเหตุผล...' : 'Please specify reason...'}
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
+                rows={3}
+              />
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => setShowVoidModal(false)}
+                  className="flex-1 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg font-semibold"
+                >
+                  {lang === 'th' ? 'ยกเลิก' : 'Cancel'}
+                </button>
+                <button
+                  onClick={handleVoidOrder}
+                  disabled={!voidReason.trim() || voidLoading}
+                  className="flex-1 py-2 bg-red-500 hover:bg-red-600 disabled:opacity-50 rounded-lg font-semibold flex items-center justify-center gap-2"
+                >
+                  {voidLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <XCircle className="w-5 h-5" />
+                  )}
+                  {lang === 'th' ? 'ยืนยันยกเลิก' : 'Confirm Void'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
 import { createClient } from '@supabase/supabase-js';
 import POSNavbar from '@/components/POSNavbar';
 import { mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
+import { getThemeClasses, POSTheme } from '@/lib/pos-theme';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -91,6 +92,10 @@ export default function CashierDashboardPage() {
   // Language state
   const [lang, setLang] = useState<POSLanguage>('th');
 
+  // Theme state
+  const [posTheme, setPosTheme] = useState<POSTheme>('orange');
+  const themeClasses = getThemeClasses(posTheme);
+
   // Update clock
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -161,6 +166,9 @@ export default function CashierDashboardPage() {
             const newLang = (payload.new as any).primary_language;
             setLang(mapToPOSLanguage(newLang));
           }
+          if (payload.new && (payload.new as any).pos_theme_color) {
+            setPosTheme((payload.new as any).pos_theme_color as POSTheme);
+          }
         }
       )
       .subscribe();
@@ -195,20 +203,23 @@ export default function CashierDashboardPage() {
     }
   };
 
-  // Fetch restaurant settings (primary language)
+  // Fetch restaurant settings (primary language and theme)
   const fetchRestaurantSettings = useCallback(async () => {
     if (!session?.restaurantId) return;
 
     try {
       const { data, error } = await supabase
         .from('restaurants')
-        .select('primary_language')
+        .select('primary_language, pos_theme_color')
         .eq('id', session.restaurantId)
         .single();
 
       if (data?.primary_language) {
         const posLang = mapToPOSLanguage(data.primary_language);
         setLang(posLang);
+      }
+      if (data?.pos_theme_color) {
+        setPosTheme(data.pos_theme_color as POSTheme);
       }
     } catch (error) {
       console.error('Failed to fetch restaurant settings:', error);
@@ -389,11 +400,12 @@ export default function CashierDashboardPage() {
         session={session}
         currentTime={currentTime}
         lang={lang}
+        theme={posTheme}
       />
 
       {/* Sub Header - Date and Controls */}
       <div className="bg-slate-800 px-4 py-2 flex items-center justify-between border-b border-slate-700">
-        <h2 className="text-lg font-semibold text-orange-500">
+        <h2 className={`text-lg font-semibold ${themeClasses.textPrimary}`}>
           {lang === 'th' ? 'รายงานประจำวัน' : 'Daily Report'}
         </h2>
 
@@ -512,7 +524,7 @@ export default function CashierDashboardPage() {
             </div>
 
             {/* Total Revenue */}
-            <div className="bg-gradient-to-r from-orange-500 to-red-500 rounded-xl p-6">
+            <div className={`bg-gradient-to-r ${themeClasses.bgGradient} rounded-xl p-6`}>
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-3 mb-2">

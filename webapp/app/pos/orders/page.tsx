@@ -6,10 +6,13 @@ import {
   Users, Bell, Volume2, VolumeX, Clock, CheckCircle,
   AlertTriangle, LogOut, RefreshCw, Loader2, Timer,
   Utensils, Coffee, Hand, Droplets, Receipt,
-  MessageSquare, Store, MapPin, X
+  MessageSquare, Store, MapPin, X, Printer, XCircle, Eye
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
-import { t, mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
+import { t, tBilingual, mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
+import { getThemeClasses, POSTheme } from '@/lib/pos-theme';
+import BilingualText, { BilingualTextInline } from '@/components/BilingualText';
+import POSNavbar from '@/components/POSNavbar';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -78,6 +81,20 @@ export default function StaffOrdersPage() {
   const [primaryLanguage, setPrimaryLanguage] = useState<string>('th');
   const [translatedTexts, setTranslatedTexts] = useState<Record<string, string>>({});
   const [lang, setLang] = useState<POSLanguage>('th');
+
+  // Theme state
+  const [posTheme, setPosTheme] = useState<POSTheme>('orange');
+  const themeClasses = getThemeClasses(posTheme);
+
+  // Void order states
+  const [showVoidModal, setShowVoidModal] = useState(false);
+  const [voidingOrder, setVoidingOrder] = useState<Order | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidLoading, setVoidLoading] = useState(false);
+
+  // Print preview states
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [printPreviewOrder, setPrintPreviewOrder] = useState<Order | null>(null);
 
   // Check session
   useEffect(() => {
@@ -209,14 +226,14 @@ export default function StaffOrdersPage() {
     }
   }, [session?.restaurantId]);
 
-  // Fetch restaurant settings (primary language)
+  // Fetch restaurant settings (primary language and theme)
   const fetchRestaurantSettings = useCallback(async () => {
     if (!session?.restaurantId) return;
 
     try {
       const { data, error } = await supabase
         .from('restaurants')
-        .select('primary_language')
+        .select('primary_language, pos_theme_color')
         .eq('id', session.restaurantId)
         .single();
 
@@ -225,6 +242,9 @@ export default function StaffOrdersPage() {
         // Sync UI language with database setting
         const posLang = mapToPOSLanguage(data.primary_language);
         setLang(posLang);
+      }
+      if (data?.pos_theme_color) {
+        setPosTheme(data.pos_theme_color as POSTheme);
       }
     } catch (error) {
       console.error('Failed to fetch restaurant settings:', error);
@@ -320,6 +340,9 @@ export default function StaffOrdersPage() {
             const newLang = (payload.new as any).primary_language;
             setPrimaryLanguage(newLang);
             setLang(mapToPOSLanguage(newLang));
+          }
+          if (payload.new && (payload.new as any).pos_theme_color) {
+            setPosTheme((payload.new as any).pos_theme_color as POSTheme);
           }
         }
       )
@@ -431,6 +454,130 @@ export default function StaffOrdersPage() {
     }
   };
 
+  // Void order
+  const handleVoidOrder = async () => {
+    if (!voidingOrder || !voidReason.trim()) return;
+
+    setVoidLoading(true);
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/orders/${voidingOrder.id}/void`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: voidReason,
+          voided_by: session?.staffId
+        })
+      });
+
+      if (response.ok) {
+        setOrders((prev) => prev.filter((o) => o.id !== voidingOrder.id));
+        setShowVoidModal(false);
+        setVoidingOrder(null);
+        setVoidReason('');
+      } else {
+        const data = await response.json();
+        alert(data.detail || 'Failed to void order');
+      }
+    } catch (error) {
+      console.error('Failed to void order:', error);
+      alert('Failed to void order');
+    } finally {
+      setVoidLoading(false);
+    }
+  };
+
+  // Open void modal
+  const openVoidModal = (order: Order) => {
+    setVoidingOrder(order);
+    setVoidReason('');
+    setShowVoidModal(true);
+  };
+
+  // Open print preview
+  const openPrintPreview = (order: Order) => {
+    setPrintPreviewOrder(order);
+    setShowPrintPreview(true);
+  };
+
+  // Print order receipt
+  const printOrder = (order: Order) => {
+    const printWindow = window.open('', '', 'width=400,height=600');
+    if (!printWindow) {
+      alert('Please allow popups to print');
+      return;
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Order Receipt</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'Courier New', monospace; width: 80mm; padding: 10mm; font-size: 12px; }
+          .header { text-align: center; margin-bottom: 15px; border-bottom: 2px dashed #000; padding-bottom: 10px; }
+          .header h1 { font-size: 18px; margin-bottom: 5px; }
+          .info { margin-bottom: 15px; }
+          .info p { margin: 3px 0; }
+          .items { border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 10px 0; margin: 10px 0; }
+          .item { display: flex; justify-content: space-between; margin: 5px 0; }
+          .item-name { flex: 1; }
+          .item-qty { width: 30px; text-align: center; }
+          .item-price { width: 60px; text-align: right; }
+          .total { font-size: 16px; font-weight: bold; text-align: right; margin-top: 10px; }
+          .footer { text-align: center; margin-top: 20px; font-size: 10px; }
+          .special { background: #f0f0f0; padding: 5px; margin: 10px 0; font-style: italic; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>${session?.restaurantName || 'Restaurant'}</h1>
+          <p>Order Receipt</p>
+        </div>
+
+        <div class="info">
+          <p><strong>Order #:</strong> ${order.id.slice(0, 8).toUpperCase()}</p>
+          <p><strong>Date:</strong> ${new Date(order.created_at).toLocaleString('en-NZ')}</p>
+          <p><strong>Type:</strong> ${order.service_type === 'dine_in' ? 'Dine In' : order.service_type === 'pickup' ? 'Pickup' : 'Delivery'}</p>
+          ${order.table_no ? `<p><strong>Table:</strong> ${order.table_no}</p>` : ''}
+          ${order.customer_name ? `<p><strong>Customer:</strong> ${order.customer_name}</p>` : ''}
+        </div>
+
+        <div class="items">
+          ${order.items.map(item => `
+            <div class="item">
+              <span class="item-qty">${item.quantity}x</span>
+              <span class="item-name">${item.nameEn || item.name}</span>
+              <span class="item-price">$${(item.price * item.quantity).toFixed(2)}</span>
+            </div>
+            ${item.selectedMeat ? `<div class="item"><span class="item-qty"></span><span class="item-name" style="font-size:10px;color:#666;">  + ${item.selectedMeat}</span><span class="item-price"></span></div>` : ''}
+            ${item.selectedAddOns?.length ? `<div class="item"><span class="item-qty"></span><span class="item-name" style="font-size:10px;color:#666;">  + ${item.selectedAddOns.join(', ')}</span><span class="item-price"></span></div>` : ''}
+          `).join('')}
+        </div>
+
+        ${order.special_instructions ? `<div class="special">Note: ${order.special_instructions}</div>` : ''}
+
+        <div class="total">
+          Total: $${order.total_price?.toFixed(2) || '0.00'}
+        </div>
+
+        <div class="footer">
+          <p>Thank you for your order!</p>
+          <p>Powered by Smart Menu</p>
+        </div>
+
+        <script>
+          window.onload = function() { window.print(); window.close(); }
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   // Update service request status
   const updateRequestStatus = async (requestId: string, newStatus: ServiceRequest['status']) => {
     try {
@@ -502,65 +649,29 @@ export default function StaffOrdersPage() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white">
-      {/* Header */}
-      <header className="bg-slate-800 border-b border-slate-700 px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Users className="w-8 h-8 text-orange-500" />
-              <div>
-                <h1 className="text-xl font-bold">{t('orders', 'title', lang)}</h1>
-                <p className="text-sm text-slate-400">{session.restaurantName} • {session.staffName}</p>
-              </div>
-            </div>
-          </div>
+      {/* Navigation Bar */}
+      <POSNavbar
+        session={session}
+        currentTime={currentTime}
+        lang={lang}
+        theme={posTheme}
+        soundEnabled={soundEnabled}
+        onSoundToggle={() => setSoundEnabled(!soundEnabled)}
+        volume={volume}
+        onVolumeChange={setVolume}
+        showSoundControls={true}
+      />
 
-          <div className="flex items-center gap-4">
-            {/* Clock */}
-            <div className="text-2xl font-mono text-orange-500">
-              {currentTime.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
-            </div>
-
-            {/* Sound Toggle */}
-            <button
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`p-2 rounded-lg transition-colors ${
-                soundEnabled ? 'bg-green-500/20 text-green-500' : 'bg-slate-700 text-slate-400'
-              }`}
-            >
-              {soundEnabled ? <Volume2 className="w-6 h-6" /> : <VolumeX className="w-6 h-6" />}
-            </button>
-
-            {soundEnabled && (
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
-                className="w-24 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500"
-              />
-            )}
-
-            {/* Refresh */}
-            <button
-              onClick={() => { fetchOrders(); fetchServiceRequests(); }}
-              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-            >
-              <RefreshCw className="w-6 h-6" />
-            </button>
-
-            {/* Logout */}
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-lg transition-colors"
-            >
-              <LogOut className="w-5 h-5" />
-              {t('orders', 'logout', lang)}
-            </button>
-          </div>
-        </div>
-      </header>
+      {/* Refresh Button */}
+      <div className="bg-slate-800 px-4 py-2 flex justify-end border-b border-slate-700">
+        <button
+          onClick={() => { fetchOrders(); fetchServiceRequests(); }}
+          className="flex items-center gap-2 px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-sm"
+        >
+          <RefreshCw className="w-4 h-4" />
+          <span>{lang === 'th' ? 'รีเฟรช' : 'Refresh'}</span>
+        </button>
+      </div>
 
       {/* Tabs */}
       <div className="flex border-b border-slate-700">
@@ -568,13 +679,18 @@ export default function StaffOrdersPage() {
           onClick={() => setActiveTab('orders')}
           className={`flex-1 py-4 font-semibold flex items-center justify-center gap-2 transition-colors ${
             activeTab === 'orders'
-              ? 'bg-slate-800 text-orange-500 border-b-2 border-orange-500'
+              ? `bg-slate-800 ${themeClasses.textPrimary} border-b-2 ${themeClasses.borderPrimary}`
               : 'text-slate-400 hover:text-white'
           }`}
         >
           <Utensils className="w-5 h-5" />
-          {t('orders', 'ordersTab', lang)}
-          <span className="px-2 py-0.5 bg-orange-500 text-white text-sm rounded-full">
+          <BilingualTextInline
+            category="orders"
+            textKey="ordersTab"
+            lang={lang}
+            englishClassName="text-[10px] opacity-70 ml-1"
+          />
+          <span className={`px-2 py-0.5 ${themeClasses.bgPrimary} text-white text-sm rounded-full`}>
             {orders.length}
           </span>
         </button>
@@ -582,12 +698,17 @@ export default function StaffOrdersPage() {
           onClick={() => setActiveTab('requests')}
           className={`flex-1 py-4 font-semibold flex items-center justify-center gap-2 transition-colors relative ${
             activeTab === 'requests'
-              ? 'bg-slate-800 text-orange-500 border-b-2 border-orange-500'
+              ? `bg-slate-800 ${themeClasses.textPrimary} border-b-2 ${themeClasses.borderPrimary}`
               : 'text-slate-400 hover:text-white'
           }`}
         >
           <Bell className="w-5 h-5" />
-          {t('orders', 'requestsTab', lang)}
+          <BilingualTextInline
+            category="orders"
+            textKey="requestsTab"
+            lang={lang}
+            englishClassName="text-[10px] opacity-70 ml-1"
+          />
           {pendingRequestsCount > 0 && (
             <span className="px-2 py-0.5 bg-red-500 text-white text-sm rounded-full animate-pulse">
               {pendingRequestsCount}
@@ -607,7 +728,14 @@ export default function StaffOrdersPage() {
           orders.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-slate-500">
               <Coffee className="w-16 h-16 mb-4" />
-              <p className="text-xl">{t('orders', 'noOrders', lang)}</p>
+              <BilingualText
+                category="orders"
+                textKey="noOrders"
+                lang={lang}
+                className="items-center"
+                primaryClassName="text-xl"
+                englishClassName="text-sm opacity-60"
+              />
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -617,7 +745,7 @@ export default function StaffOrdersPage() {
                   <div className="p-4 bg-slate-700/50 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       {order.service_type === 'dine_in' ? (
-                        <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center">
+                        <div className={`w-12 h-12 ${themeClasses.bgPrimary} rounded-full flex items-center justify-center`}>
                           <span className="text-lg font-bold">T{order.table_no}</span>
                         </div>
                       ) : order.service_type === 'pickup' ? (
@@ -642,7 +770,7 @@ export default function StaffOrdersPage() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-lg font-bold text-orange-500">฿{order.total_price?.toFixed(0) || '0'}</p>
+                      <p className={`text-lg font-bold ${themeClasses.textPrimary}`}>${order.total_price?.toFixed(2) || '0.00'}</p>
                       <p className="text-xs text-slate-400">{getTimeSince(order.created_at)}</p>
                     </div>
                   </div>
@@ -684,7 +812,31 @@ export default function StaffOrdersPage() {
                   )}
 
                   {/* Actions */}
-                  <div className="p-3 bg-slate-700/30 flex gap-2">
+                  <div className="p-3 bg-slate-700/30 flex gap-2 flex-wrap">
+                    {/* Preview Button */}
+                    <button
+                      onClick={() => openPrintPreview(order)}
+                      className="px-3 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg font-semibold flex items-center justify-center gap-1"
+                      title={lang === 'th' ? 'ดูรายละเอียด' : 'Preview'}
+                    >
+                      <Eye className="w-5 h-5" />
+                    </button>
+                    {/* Print Button */}
+                    <button
+                      onClick={() => printOrder(order)}
+                      className="px-3 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold flex items-center justify-center gap-1"
+                      title={lang === 'th' ? 'พิมพ์' : 'Print'}
+                    >
+                      <Printer className="w-5 h-5" />
+                    </button>
+                    {/* Void Button */}
+                    <button
+                      onClick={() => openVoidModal(order)}
+                      className="px-3 py-2 bg-red-500 hover:bg-red-600 rounded-lg font-semibold flex items-center justify-center gap-1"
+                      title={lang === 'th' ? 'ยกเลิกออเดอร์' : 'Void'}
+                    >
+                      <XCircle className="w-5 h-5" />
+                    </button>
                     {order.status === 'ready' && (
                       <button
                         onClick={() => updateOrderStatus(order.id, 'completed')}
@@ -712,7 +864,14 @@ export default function StaffOrdersPage() {
           serviceRequests.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-slate-500">
               <Bell className="w-16 h-16 mb-4" />
-              <p className="text-xl">{t('orders', 'noRequests', lang)}</p>
+              <BilingualText
+                category="orders"
+                textKey="noRequests"
+                lang={lang}
+                className="items-center"
+                primaryClassName="text-xl"
+                englishClassName="text-sm opacity-60"
+              />
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -736,7 +895,7 @@ export default function StaffOrdersPage() {
                           </div>
                           <div>
                             <p className="font-semibold">{typeInfo.text}</p>
-                            <p className="text-2xl font-bold text-orange-500">{t('orders', 'table', lang)} {request.table_no}</p>
+                            <p className={`text-2xl font-bold ${themeClasses.textPrimary}`}>{t('orders', 'table', lang)} {request.table_no}</p>
                           </div>
                         </div>
                         <div className="text-right">
@@ -787,6 +946,152 @@ export default function StaffOrdersPage() {
           )
         )}
       </main>
+
+      {/* Void Order Modal */}
+      {showVoidModal && voidingOrder && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-xl max-w-md w-full">
+            <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-red-500">
+                {lang === 'th' ? 'ยกเลิกออเดอร์' : 'Void Order'}
+              </h3>
+              <button
+                onClick={() => setShowVoidModal(false)}
+                className="p-1 hover:bg-slate-700 rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4">
+              <p className="text-slate-400 mb-2">
+                {lang === 'th' ? 'ออเดอร์:' : 'Order:'} #{voidingOrder.id.slice(0, 8).toUpperCase()}
+              </p>
+              <p className="text-white mb-4">
+                {lang === 'th' ? 'โต๊ะ:' : 'Table:'} {voidingOrder.table_no || '-'} |
+                {lang === 'th' ? ' ยอดรวม:' : ' Total:'} ${voidingOrder.total_price?.toFixed(2) || '0.00'}
+              </p>
+
+              <label className="block text-sm text-slate-400 mb-2">
+                {lang === 'th' ? 'เหตุผลในการยกเลิก *' : 'Void Reason *'}
+              </label>
+              <textarea
+                value={voidReason}
+                onChange={(e) => setVoidReason(e.target.value)}
+                placeholder={lang === 'th' ? 'กรุณาระบุเหตุผล...' : 'Please specify reason...'}
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
+                rows={3}
+              />
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => setShowVoidModal(false)}
+                  className="flex-1 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg font-semibold"
+                >
+                  {lang === 'th' ? 'ยกเลิก' : 'Cancel'}
+                </button>
+                <button
+                  onClick={handleVoidOrder}
+                  disabled={!voidReason.trim() || voidLoading}
+                  className="flex-1 py-2 bg-red-500 hover:bg-red-600 disabled:opacity-50 rounded-lg font-semibold flex items-center justify-center gap-2"
+                >
+                  {voidLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <XCircle className="w-5 h-5" />
+                  )}
+                  {lang === 'th' ? 'ยืนยันยกเลิก' : 'Confirm Void'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Print Preview Modal */}
+      {showPrintPreview && printPreviewOrder && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full text-black my-4">
+            <div className="p-4 border-b flex items-center justify-between bg-slate-100 rounded-t-xl">
+              <h3 className="text-lg font-bold">
+                {lang === 'th' ? 'ตัวอย่างก่อนพิมพ์' : 'Print Preview'}
+              </h3>
+              <button
+                onClick={() => setShowPrintPreview(false)}
+                className="p-1 hover:bg-slate-200 rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Receipt Preview */}
+            <div className="p-6 font-mono text-sm">
+              <div className="text-center border-b-2 border-dashed border-gray-400 pb-4 mb-4">
+                <h1 className="text-xl font-bold">{session?.restaurantName || 'Restaurant'}</h1>
+                <p className="text-gray-600">Order Receipt</p>
+              </div>
+
+              <div className="mb-4 space-y-1">
+                <p><strong>Order #:</strong> {printPreviewOrder.id.slice(0, 8).toUpperCase()}</p>
+                <p><strong>Date:</strong> {new Date(printPreviewOrder.created_at).toLocaleString('en-NZ')}</p>
+                <p><strong>Type:</strong> {printPreviewOrder.service_type === 'dine_in' ? 'Dine In' : printPreviewOrder.service_type === 'pickup' ? 'Pickup' : 'Delivery'}</p>
+                {printPreviewOrder.table_no && <p><strong>Table:</strong> {printPreviewOrder.table_no}</p>}
+                {printPreviewOrder.customer_name && <p><strong>Customer:</strong> {printPreviewOrder.customer_name}</p>}
+              </div>
+
+              <div className="border-t border-b border-dashed border-gray-400 py-4 my-4">
+                {printPreviewOrder.items.map((item, idx) => (
+                  <div key={idx} className="mb-2">
+                    <div className="flex justify-between">
+                      <span>{item.quantity}x {item.nameEn || item.name}</span>
+                      <span>${(item.price * item.quantity).toFixed(2)}</span>
+                    </div>
+                    {item.selectedMeat && (
+                      <p className="text-xs text-gray-600 ml-4">+ {item.selectedMeat}</p>
+                    )}
+                    {item.selectedAddOns?.length ? (
+                      <p className="text-xs text-gray-600 ml-4">+ {item.selectedAddOns.join(', ')}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+
+              {printPreviewOrder.special_instructions && (
+                <div className="bg-gray-100 p-2 rounded mb-4 italic text-sm">
+                  Note: {printPreviewOrder.special_instructions}
+                </div>
+              )}
+
+              <div className="text-right text-lg font-bold">
+                Total: ${printPreviewOrder.total_price?.toFixed(2) || '0.00'}
+              </div>
+
+              <div className="text-center mt-6 text-xs text-gray-500">
+                <p>Thank you for your order!</p>
+                <p>Powered by Smart Menu</p>
+              </div>
+            </div>
+
+            <div className="p-4 border-t bg-slate-100 rounded-b-xl flex gap-3">
+              <button
+                onClick={() => setShowPrintPreview(false)}
+                className="flex-1 py-2 bg-slate-300 hover:bg-slate-400 rounded-lg font-semibold text-black"
+              >
+                {lang === 'th' ? 'ปิด' : 'Close'}
+              </button>
+              <button
+                onClick={() => {
+                  printOrder(printPreviewOrder);
+                  setShowPrintPreview(false);
+                }}
+                className="flex-1 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold flex items-center justify-center gap-2"
+              >
+                <Printer className="w-5 h-5" />
+                {lang === 'th' ? 'พิมพ์' : 'Print'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

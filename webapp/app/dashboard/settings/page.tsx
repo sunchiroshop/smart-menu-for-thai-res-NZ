@@ -51,6 +51,7 @@ interface Staff {
 interface Restaurant {
   restaurant_id: string;
   id?: string; // Alternative field name from some API responses
+  slug?: string; // URL-friendly slug for public menu
   name: string;
   phone: string;
   email: string;
@@ -140,6 +141,20 @@ function SettingsContent() {
 
   // Restaurant Primary Language (for translating customer messages)
   const [primaryLanguage, setPrimaryLanguage] = useState<string>('th');
+
+  // POS Theme Color
+  const [posThemeColor, setPosThemeColor] = useState<string>('orange');
+  const POS_THEME_OPTIONS = [
+    { code: 'orange', name: 'Orange (Default)', colors: { primary: '#f97316', secondary: '#ea580c', bg: 'from-orange-500 to-red-500' } },
+    { code: 'blue', name: 'Blue Ocean', colors: { primary: '#3b82f6', secondary: '#2563eb', bg: 'from-blue-500 to-cyan-500' } },
+    { code: 'green', name: 'Green Forest', colors: { primary: '#22c55e', secondary: '#16a34a', bg: 'from-green-500 to-emerald-500' } },
+    { code: 'purple', name: 'Purple Royal', colors: { primary: '#a855f7', secondary: '#9333ea', bg: 'from-purple-500 to-pink-500' } },
+    { code: 'red', name: 'Red Fire', colors: { primary: '#ef4444', secondary: '#dc2626', bg: 'from-red-500 to-rose-500' } },
+    { code: 'teal', name: 'Teal Fresh', colors: { primary: '#14b8a6', secondary: '#0d9488', bg: 'from-teal-500 to-cyan-500' } },
+    { code: 'amber', name: 'Amber Gold', colors: { primary: '#f59e0b', secondary: '#d97706', bg: 'from-amber-500 to-yellow-500' } },
+    { code: 'pink', name: 'Pink Sweet', colors: { primary: '#ec4899', secondary: '#db2777', bg: 'from-pink-500 to-rose-500' } },
+  ];
+
   const AVAILABLE_LANGUAGES = [
     { code: 'th', name: 'ไทย (Thai)', flag: '🇹🇭' },
     { code: 'en', name: 'English', flag: '🇬🇧' },
@@ -329,6 +344,11 @@ function SettingsContent() {
       // Load primary language
       if ((profile.restaurant as any).primary_language) {
         setPrimaryLanguage((profile.restaurant as any).primary_language);
+      }
+
+      // Load POS theme color
+      if ((profile.restaurant as any).pos_theme_color) {
+        setPosThemeColor((profile.restaurant as any).pos_theme_color);
       }
 
       // Load restaurant location
@@ -612,6 +632,7 @@ function SettingsContent() {
           user_id: session.user.id,
           service_options: serviceOptions,
           primary_language: primaryLanguage,
+          pos_theme_color: posThemeColor,
           delivery_rates: deliveryRates,
           delivery_settings: deliverySettings
         })
@@ -1006,7 +1027,7 @@ function SettingsContent() {
             {/* View Menu Button */}
             {profile?.restaurant?.restaurant_id && (
               <a
-                href={`/restaurant/${profile.restaurant.restaurant_id}`}
+                href={`/restaurant/${profile.restaurant.slug || profile.restaurant.restaurant_id}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors text-sm"
@@ -1988,6 +2009,46 @@ function SettingsContent() {
               </p>
             </div>
 
+            {/* Divider */}
+            <div className="my-8 border-t border-gray-200"></div>
+
+            {/* POS Theme Color Setting */}
+            <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-gradient-to-r from-orange-500 to-red-500"></span>
+              ธีมสีหน้า POS (POS Theme Color)
+            </h2>
+            <p className="text-gray-600 mb-6">
+              เลือกธีมสีสำหรับหน้า POS ของร้านคุณ สีจะแสดงในหน้าครัว, พนักงาน และแคชเชียร์
+            </p>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {POS_THEME_OPTIONS.map((theme) => (
+                <button
+                  key={theme.code}
+                  onClick={() => setPosThemeColor(theme.code)}
+                  className={`p-4 rounded-xl border-2 transition-all ${
+                    posThemeColor === theme.code
+                      ? 'border-gray-900 ring-2 ring-gray-300'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className={`h-16 rounded-lg bg-gradient-to-r ${theme.colors.bg} mb-3`}></div>
+                  <span className={`text-sm font-medium ${
+                    posThemeColor === theme.code ? 'text-gray-900' : 'text-gray-600'
+                  }`}>
+                    {theme.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <p className="text-gray-700 text-sm">
+                🎨 <strong>หมายเหตุ:</strong> ธีมสีจะเปลี่ยนแปลงทันทีในหน้า POS ทุกหน้า (Kitchen, Orders, Cashier)
+                หลังจากบันทึก
+              </p>
+            </div>
+
             {/* Save Button */}
             <div className="mt-8 pt-6 border-t border-gray-200">
               <button
@@ -2044,10 +2105,11 @@ function SettingsContent() {
                       onChange={(e) => setNewStaff({...newStaff, role: e.target.value as Staff['role']})}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white"
                     >
-                      <option value="waiter">พนักงานเสิร์ฟ (Waiter)</option>
-                      <option value="chef">พ่อครัว (Chef)</option>
-                      <option value="cashier">แคชเชียร์ (Cashier)</option>
+                      <option value="owner">เจ้าของร้าน (Owner)</option>
                       <option value="manager">ผู้จัดการ (Manager)</option>
+                      <option value="chef">พ่อครัว (Chef)</option>
+                      <option value="waiter">พนักงานเสิร์ฟ (Waiter)</option>
+                      <option value="cashier">แคชเชียร์ (Cashier)</option>
                     </select>
                   </div>
                   <div>
