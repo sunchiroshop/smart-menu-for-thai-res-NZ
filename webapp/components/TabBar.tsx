@@ -63,22 +63,26 @@ export default function TabBar() {
   }
 
   return (
-    <div className="sticky top-0 left-0 right-0 z-50 bg-slate-800 border-b border-slate-700 shadow-lg">
-      <nav className="flex justify-center items-center h-14 max-w-4xl mx-auto px-4 gap-2">
+    <div className="sticky top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 shadow-lg">
+      <nav className="flex justify-around items-center h-16 max-w-lg mx-auto">
         {tabs.map((tab) => {
           const isActive = pathname === tab.href || pathname.startsWith(tab.href + '/');
           return (
             <Link
               key={tab.href}
               href={tab.href}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+              className={`flex flex-col items-center justify-center flex-1 h-full transition-colors ${
                 isActive
-                  ? 'bg-orange-500 text-white'
-                  : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+                  ? 'text-orange-500'
+                  : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              <span>{tab.icon}</span>
-              <span className="text-sm font-medium hidden sm:inline">{tab.label}</span>
+              <span className={isActive ? 'text-orange-500' : 'text-gray-500'}>
+                {tab.icon}
+              </span>
+              <span className={`text-xs mt-1 font-medium ${isActive ? 'text-orange-500' : 'text-gray-500'}`}>
+                {tab.label}
+              </span>
             </Link>
           );
         })}
