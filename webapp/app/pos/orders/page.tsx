@@ -82,8 +82,14 @@ export default function StaffOrdersPage() {
   const [translatedTexts, setTranslatedTexts] = useState<Record<string, string>>({});
   const [lang, setLang] = useState<POSLanguage>('th');
 
-  // Theme state
-  const [posTheme, setPosTheme] = useState<POSTheme>('orange');
+  // Theme state - load from localStorage first for instant display
+  const [posTheme, setPosTheme] = useState<POSTheme>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pos_theme');
+      if (saved) return saved as POSTheme;
+    }
+    return 'orange';
+  });
   const themeClasses = getThemeClasses(posTheme);
 
   // Void order states
@@ -245,6 +251,7 @@ export default function StaffOrdersPage() {
       }
       if (data?.pos_theme_color) {
         setPosTheme(data.pos_theme_color as POSTheme);
+        localStorage.setItem('pos_theme', data.pos_theme_color);
       }
     } catch (error) {
       console.error('Failed to fetch restaurant settings:', error);
@@ -342,7 +349,9 @@ export default function StaffOrdersPage() {
             setLang(mapToPOSLanguage(newLang));
           }
           if (payload.new && (payload.new as any).pos_theme_color) {
-            setPosTheme((payload.new as any).pos_theme_color as POSTheme);
+            const newTheme = (payload.new as any).pos_theme_color as POSTheme;
+            setPosTheme(newTheme);
+            localStorage.setItem('pos_theme', newTheme);
           }
         }
       )
@@ -499,9 +508,283 @@ export default function StaffOrdersPage() {
     setShowPrintPreview(true);
   };
 
-  // Print order receipt
+  // Print order receipt (optimized for 80mm thermal printers)
   const printOrder = (order: Order) => {
-    const printWindow = window.open('', '', 'width=400,height=600');
+    const printWindow = window.open('', '', 'width=320,height=600');
+    if (!printWindow) {
+      alert('Please allow popups to print');
+      return;
+    }
+
+    // Calculate subtotal from items
+    const subtotal = order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
+    // Get additional fees from order (delivery_fee, surcharge_amount)
+    const orderAny = order as any;
+    const deliveryFee = orderAny.delivery_fee || 0;
+    const surchargeAmount = orderAny.surcharge_amount || 0;
+
+    // Calculate GST (NZ: 15% included in price, formula: total * 3 / 23)
+    const totalPrice = order.total_price || subtotal + deliveryFee + surchargeAmount;
+    const gstAmount = Math.round(totalPrice * 3 / 23 * 100) / 100;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Receipt - ${order.id.slice(0, 8).toUpperCase()}</title>
+        <style>
+          /* Thermal Printer CSS - 80mm width */
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+
+          @page {
+            size: 80mm auto;
+            margin: 0;
+          }
+
+          body {
+            font-family: 'Courier New', Courier, monospace;
+            width: 80mm;
+            max-width: 80mm;
+            padding: 3mm;
+            font-size: 12px;
+            line-height: 1.3;
+            background: white;
+            color: black;
+          }
+
+          .receipt { width: 100%; }
+
+          .header {
+            text-align: center;
+            border-bottom: 2px dashed #000;
+            padding-bottom: 3mm;
+            margin-bottom: 3mm;
+          }
+
+          .header h1 {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 1mm;
+          }
+
+          .header .subtitle {
+            font-size: 10px;
+          }
+
+          .order-type {
+            display: inline-block;
+            background: #000;
+            color: #fff;
+            padding: 1mm 3mm;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-top: 2mm;
+          }
+
+          .info {
+            margin-bottom: 3mm;
+            font-size: 11px;
+          }
+
+          .info p { margin: 1mm 0; }
+
+          .items {
+            border-top: 1px dashed #000;
+            border-bottom: 1px dashed #000;
+            padding: 2mm 0;
+            margin: 2mm 0;
+          }
+
+          .item {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin: 1.5mm 0;
+            font-size: 11px;
+          }
+
+          .item-qty {
+            width: 8mm;
+            font-weight: bold;
+          }
+
+          .item-name {
+            flex: 1;
+            padding: 0 1mm;
+          }
+
+          .item-price {
+            width: 18mm;
+            text-align: right;
+          }
+
+          .modifier {
+            font-size: 9px;
+            color: #333;
+            padding-left: 10mm;
+            margin: 0.5mm 0;
+          }
+
+          .special {
+            background: #f0f0f0;
+            border: 1px solid #999;
+            padding: 2mm;
+            margin: 2mm 0;
+            font-size: 10px;
+          }
+
+          .special-label {
+            font-weight: bold;
+            margin-bottom: 1mm;
+          }
+
+          .totals {
+            margin-top: 2mm;
+            padding-top: 2mm;
+            font-size: 11px;
+          }
+
+          .total-line {
+            display: flex;
+            justify-content: space-between;
+            margin: 1mm 0;
+          }
+
+          .grand-total {
+            font-size: 14px;
+            font-weight: bold;
+            border-top: 2px solid #000;
+            padding-top: 2mm;
+            margin-top: 2mm;
+          }
+
+          .gst-info {
+            font-size: 9px;
+            text-align: right;
+            color: #333;
+            margin-top: 1mm;
+          }
+
+          .footer {
+            text-align: center;
+            margin-top: 4mm;
+            padding-top: 3mm;
+            border-top: 2px dashed #000;
+            font-size: 9px;
+          }
+
+          .footer p { margin: 1mm 0; }
+
+          .cut-line {
+            text-align: center;
+            margin-top: 5mm;
+            padding-top: 3mm;
+            border-top: 1px dashed #999;
+            font-size: 8px;
+            color: #999;
+          }
+
+          @media print {
+            body { padding: 0; }
+            .no-print { display: none !important; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="receipt">
+          <div class="header">
+            <h1>${session?.restaurantName || 'Restaurant'}</h1>
+            <p class="subtitle">TAX INVOICE</p>
+            <span class="order-type">${order.service_type === 'dine_in' ? 'DINE IN' : order.service_type === 'pickup' ? 'PICKUP' : 'DELIVERY'}</span>
+          </div>
+
+          <div class="info">
+            <p><strong>Order #:</strong> ${order.id.slice(0, 8).toUpperCase()}</p>
+            <p><strong>Date:</strong> ${new Date(order.created_at).toLocaleString('en-NZ', {
+              day: '2-digit', month: '2-digit', year: 'numeric',
+              hour: '2-digit', minute: '2-digit'
+            })}</p>
+            ${order.table_no ? `<p><strong>Table:</strong> ${order.table_no}</p>` : ''}
+            ${order.customer_name ? `<p><strong>Customer:</strong> ${order.customer_name}</p>` : ''}
+          </div>
+
+          <div class="items">
+            ${order.items.map(item => `
+              <div class="item">
+                <span class="item-qty">${item.quantity}x</span>
+                <span class="item-name">${item.nameEn || item.name}</span>
+                <span class="item-price">$${(item.price * item.quantity).toFixed(2)}</span>
+              </div>
+              ${item.selectedMeat ? `<div class="modifier">+ ${item.selectedMeat}</div>` : ''}
+              ${item.selectedAddOns?.length ? `<div class="modifier">+ ${item.selectedAddOns.join(', ')}</div>` : ''}
+              ${item.notes ? `<div class="modifier">"${item.notes}"</div>` : ''}
+            `).join('')}
+          </div>
+
+          ${order.special_instructions ? `
+            <div class="special">
+              <div class="special-label">SPECIAL NOTE:</div>
+              ${order.special_instructions}
+            </div>
+          ` : ''}
+
+          <div class="totals">
+            <div class="total-line">
+              <span>Subtotal:</span>
+              <span>$${subtotal.toFixed(2)}</span>
+            </div>
+            ${deliveryFee > 0 ? `
+              <div class="total-line">
+                <span>Delivery Fee:</span>
+                <span>$${deliveryFee.toFixed(2)}</span>
+              </div>
+            ` : ''}
+            ${surchargeAmount > 0 ? `
+              <div class="total-line">
+                <span>Service Fee:</span>
+                <span>$${surchargeAmount.toFixed(2)}</span>
+              </div>
+            ` : ''}
+            <div class="total-line grand-total">
+              <span>TOTAL:</span>
+              <span>$${totalPrice.toFixed(2)} NZD</span>
+            </div>
+            <div class="gst-info">
+              Incl. GST (15%): $${gstAmount.toFixed(2)}
+            </div>
+          </div>
+
+          <div class="footer">
+            <p>Thank you for your order!</p>
+            <p>Powered by Smart Menu NZ</p>
+          </div>
+
+          <div class="cut-line">
+            - - - - - - - - - - - -
+          </div>
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.close();
+            }, 250);
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
+  // Print kitchen ticket (for kitchen display)
+  const printKitchenTicket = (order: Order) => {
+    const printWindow = window.open('', '', 'width=320,height=600');
     if (!printWindow) {
       alert('Please allow popups to print');
       return;
@@ -511,64 +794,114 @@ export default function StaffOrdersPage() {
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Order Receipt</title>
+        <title>Kitchen - ${order.id.slice(0, 8).toUpperCase()}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: 'Courier New', monospace; width: 80mm; padding: 10mm; font-size: 12px; }
-          .header { text-align: center; margin-bottom: 15px; border-bottom: 2px dashed #000; padding-bottom: 10px; }
-          .header h1 { font-size: 18px; margin-bottom: 5px; }
-          .info { margin-bottom: 15px; }
-          .info p { margin: 3px 0; }
-          .items { border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 10px 0; margin: 10px 0; }
-          .item { display: flex; justify-content: space-between; margin: 5px 0; }
-          .item-name { flex: 1; }
-          .item-qty { width: 30px; text-align: center; }
-          .item-price { width: 60px; text-align: right; }
-          .total { font-size: 16px; font-weight: bold; text-align: right; margin-top: 10px; }
-          .footer { text-align: center; margin-top: 20px; font-size: 10px; }
-          .special { background: #f0f0f0; padding: 5px; margin: 10px 0; font-style: italic; }
-          @media print { body { padding: 0; } }
+          @page { size: 80mm auto; margin: 0; }
+          body {
+            font-family: 'Courier New', Courier, monospace;
+            width: 80mm;
+            padding: 3mm;
+            font-size: 12px;
+            background: white;
+            color: black;
+          }
+          .order-number {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            border: 3px solid black;
+            padding: 3mm;
+            margin-bottom: 3mm;
+          }
+          .order-type {
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            text-transform: uppercase;
+            background: black;
+            color: white;
+            padding: 2mm;
+            margin-bottom: 3mm;
+          }
+          .info { font-size: 11px; margin-bottom: 3mm; }
+          .info p { margin: 1mm 0; }
+          .items { border-top: 2px solid black; padding-top: 3mm; }
+          .item {
+            font-size: 14px;
+            font-weight: bold;
+            margin: 3mm 0;
+            padding-bottom: 2mm;
+            border-bottom: 1px dashed #ccc;
+          }
+          .item-qty { font-size: 16px; }
+          .modifier {
+            font-size: 12px;
+            font-weight: normal;
+            padding-left: 5mm;
+            margin: 1mm 0;
+          }
+          .special {
+            background: #f0f0f0;
+            border: 3px solid black;
+            padding: 3mm;
+            margin: 3mm 0;
+            font-size: 14px;
+            font-weight: bold;
+          }
+          .time {
+            text-align: center;
+            font-size: 11px;
+            margin-top: 3mm;
+            padding-top: 2mm;
+            border-top: 1px dashed black;
+          }
         </style>
       </head>
       <body>
-        <div class="header">
-          <h1>${session?.restaurantName || 'Restaurant'}</h1>
-          <p>Order Receipt</p>
+        <div class="order-number">
+          #${order.id.slice(0, 8).toUpperCase()}
+        </div>
+
+        <div class="order-type">
+          ${order.service_type === 'dine_in' ? 'DINE IN' : order.service_type === 'pickup' ? 'PICKUP' : 'DELIVERY'}
         </div>
 
         <div class="info">
-          <p><strong>Order #:</strong> ${order.id.slice(0, 8).toUpperCase()}</p>
-          <p><strong>Date:</strong> ${new Date(order.created_at).toLocaleString('en-NZ')}</p>
-          <p><strong>Type:</strong> ${order.service_type === 'dine_in' ? 'Dine In' : order.service_type === 'pickup' ? 'Pickup' : 'Delivery'}</p>
-          ${order.table_no ? `<p><strong>Table:</strong> ${order.table_no}</p>` : ''}
-          ${order.customer_name ? `<p><strong>Customer:</strong> ${order.customer_name}</p>` : ''}
+          ${order.table_no ? `<p><strong>TABLE: ${order.table_no}</strong></p>` : ''}
+          ${order.customer_name ? `<p>Customer: ${order.customer_name}</p>` : ''}
         </div>
 
         <div class="items">
           ${order.items.map(item => `
             <div class="item">
-              <span class="item-qty">${item.quantity}x</span>
-              <span class="item-name">${item.nameEn || item.name}</span>
-              <span class="item-price">$${(item.price * item.quantity).toFixed(2)}</span>
+              <span class="item-qty">${item.quantity}x</span> ${item.name}
+              ${item.selectedMeat ? `<div class="modifier">+ ${item.selectedMeat}</div>` : ''}
+              ${item.selectedAddOns?.length ? `<div class="modifier">+ ${item.selectedAddOns.join(', ')}</div>` : ''}
+              ${item.notes ? `<div class="modifier">"${item.notes}"</div>` : ''}
             </div>
-            ${item.selectedMeat ? `<div class="item"><span class="item-qty"></span><span class="item-name" style="font-size:10px;color:#666;">  + ${item.selectedMeat}</span><span class="item-price"></span></div>` : ''}
-            ${item.selectedAddOns?.length ? `<div class="item"><span class="item-qty"></span><span class="item-name" style="font-size:10px;color:#666;">  + ${item.selectedAddOns.join(', ')}</span><span class="item-price"></span></div>` : ''}
           `).join('')}
         </div>
 
-        ${order.special_instructions ? `<div class="special">Note: ${order.special_instructions}</div>` : ''}
+        ${order.special_instructions ? `
+          <div class="special">
+            NOTE: ${order.special_instructions}
+          </div>
+        ` : ''}
 
-        <div class="total">
-          Total: $${order.total_price?.toFixed(2) || '0.00'}
-        </div>
-
-        <div class="footer">
-          <p>Thank you for your order!</p>
-          <p>Powered by Smart Menu</p>
+        <div class="time">
+          ${new Date(order.created_at).toLocaleString('en-NZ', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+          })}
         </div>
 
         <script>
-          window.onload = function() { window.print(); window.close(); }
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.close();
+            }, 250);
+          }
         </script>
       </body>
       </html>

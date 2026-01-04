@@ -32,6 +32,7 @@ from services.analytics_service import analytics_service  # Analytics & Reports
 from services.staff_service import staff_service  # Staff Management
 from services.image_library_service import image_library_service  # Shared Image Library
 from services.delivery_service import delivery_service  # Delivery distance calculation
+from services.admin_service import admin_service  # Super Admin Dashboard
 
 # Initialize Supabase client for direct database access (menu_translations, etc.)
 try:
@@ -154,6 +155,8 @@ class CreateCheckoutSessionRequest(BaseModel):
     user_email: str
     plan_id: str
     interval: str = "monthly"
+    payment_method: str = "card"  # card, apple_pay, google_pay
+    coupon_code: Optional[str] = None
 
 class VerifySessionRequest(BaseModel):
     session_id: str
@@ -184,6 +187,10 @@ class UpdateProfileRequest(BaseModel):
     theme_color: Optional[str] = None
     menu_template: Optional[str] = None  # list, grid, magazine, elegant, casual
     user_id: str  # For plan checking
+    # Tax/Business info for NZ
+    gst_registered: Optional[bool] = None
+    gst_number: Optional[str] = None
+    ird_number: Optional[str] = None
 
 class CreatePortalSessionRequest(BaseModel):
     user_id: str
@@ -216,6 +223,10 @@ class UpdatePaymentSettingsRequest(BaseModel):
     accept_card: Optional[bool] = None
     accept_bank_transfer: Optional[bool] = None
     bank_accounts: Optional[List[BankAccount]] = None
+
+class UpdateSurchargeSettingsRequest(BaseModel):
+    credit_card_surcharge_enabled: Optional[bool] = None
+    credit_card_surcharge_rate: Optional[float] = None
 
 class UploadPaymentSlipRequest(BaseModel):
     order_id: str
@@ -1143,7 +1154,8 @@ async def enhance_image_upload(
 async def apply_logo_only(
     file: UploadFile = File(...),
     logo_url: str = Form(...),
-    position: Optional[str] = Form("top-right")
+    position: Optional[str] = Form("top-right"),
+    logo_size: Optional[str] = Form("medium")  # small, medium, large
 ):
     """
     ใส่โลโก้ร้านอาหารบนรูปภาพโดยไม่มีการแก้ไขภาพใดๆ
@@ -1155,6 +1167,7 @@ async def apply_logo_only(
         file: ไฟล์รูปภาพที่ต้องการใส่โลโก้
         logo_url: URL ของโลโก้ร้านอาหาร
         position: ตำแหน่งของโลโก้ (top-left, top-center, top-right, bottom-left, bottom-center, bottom-right)
+        logo_size: ขนาดของโลโก้ (small=12%, medium=18%, large=25%)
 
     Returns:
         Dictionary with:
@@ -1192,14 +1205,20 @@ async def apply_logo_only(
         if position not in valid_positions:
             position = "top-right"
 
+        # Validate logo_size
+        valid_sizes = ["small", "medium", "large"]
+        if logo_size not in valid_sizes:
+            logo_size = "medium"
+
         print(f"🎨 Apply Logo Only Request:")
         print(f"   File: {file.filename}")
         print(f"   Size: {len(image_bytes)} bytes")
         print(f"   Logo URL: {logo_url[:50]}...")
         print(f"   Position: {position}")
+        print(f"   Logo Size: {logo_size}")
 
         # Call AI service to apply logo (no enhancement)
-        result = ai_service.apply_logo_only(image_bytes, logo_url, position)
+        result = ai_service.apply_logo_only(image_bytes, logo_url, position, logo_size)
 
         if not result.get("success"):
             raise HTTPException(
@@ -1447,43 +1466,108 @@ async def initialize_trial(request: TrialStatusRequest):
 async def create_checkout_session(request: CreateCheckoutSessionRequest):
     """
     สร้าง Stripe Checkout Session สำหรับการชำระเงิน
+    Supports: card, apple_pay, google_pay
     """
     try:
+        print(f"Creating checkout session: plan={request.plan_id}, interval={request.interval}, price_id={request.price_id}, payment_method={request.payment_method}")
+
         result = stripe_service.create_checkout_session(
             price_id=request.price_id,
             user_id=request.user_id,
             user_email=request.user_email,
             plan_id=request.plan_id,
             interval=request.interval,
+            payment_method=request.payment_method,
         )
-        
+
         return {
             "success": True,
             "session_id": result['session_id'],
             "checkout_url": result['checkout_url'],
         }
-        
+
     except Exception as e:
+        print(f"Checkout session error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/stripe/verify-session", summary="Verify Stripe Checkout Session")
 async def verify_session(request: VerifySessionRequest):
     """
     ตรวจสอบ Stripe Checkout Session หลังจากชำระเงินสำเร็จ
+    และอัพเดท user_profiles ให้เป็น active subscription
     """
     try:
         result = stripe_service.verify_session(request.session_id)
-        
-        # Here you can save subscription details to your database
-        # For now, we'll just return the data
-        
+
+        # Update user_profiles with subscription details
+        if result.get('payment_status') == 'paid':
+            subscription = result.get('subscription', {})
+            plan_id = result.get('plan_id', 'pro')
+            interval = result.get('interval', 'monthly')
+
+            # Map plan_id to role
+            plan_to_role = {
+                'basic': 'starter',
+                'pro': 'professional',
+                'enterprise': 'enterprise'
+            }
+            new_role = plan_to_role.get(plan_id, 'professional')
+
+            # Calculate dates
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            if interval == 'yearly':
+                next_billing = now + timedelta(days=365)
+            else:
+                next_billing = now + timedelta(days=30)
+
+            # Update user_profiles
+            update_data = {
+                'role': new_role,
+                'plan': plan_id,
+                'subscription_status': 'active',
+                'billing_interval': interval,
+                'subscription_start_date': now.isoformat(),
+                'next_billing_date': next_billing.isoformat(),
+                'stripe_subscription_id': result.get('subscription_id'),
+                'payment_method': 'stripe',
+                'last_payment_date': now.isoformat(),
+                'last_payment_amount': result.get('amount_total', 0),
+                'updated_at': now.isoformat()
+            }
+
+            # Update in Supabase
+            supabase_client.table('user_profiles').update(update_data).eq('user_id', request.user_id).execute()
+
+            print(f"Updated user {request.user_id} to {new_role} plan ({plan_id}, {interval})")
+
+            # Log payment
+            try:
+                payment_log = {
+                    'user_id': request.user_id,
+                    'amount': result.get('amount_total', 0),
+                    'currency': result.get('currency', 'NZD').upper(),
+                    'payment_type': 'subscription',
+                    'payment_method': 'stripe',
+                    'payment_status': 'completed',
+                    'plan': plan_id,
+                    'billing_interval': interval,
+                    'stripe_payment_id': request.session_id,
+                    'stripe_subscription_id': result.get('subscription_id'),
+                }
+                supabase_client.table('payment_logs').insert(payment_log).execute()
+            except Exception as log_error:
+                print(f"Failed to log payment: {log_error}")
+
         return {
             "success": True,
             "subscription": result.get('subscription'),
             "payment_status": result.get('payment_status'),
+            "plan_updated": result.get('payment_status') == 'paid'
         }
-        
+
     except Exception as e:
+        print(f"Verify session error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/stripe/cancel-subscription", summary="Cancel Stripe Subscription")
@@ -1798,6 +1882,92 @@ async def update_payment_settings(restaurant_id: str, request: UpdatePaymentSett
             "restaurant_id": restaurant_id,
             "payment_settings": current_settings,
             "message": "Payment settings updated successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Restaurant Surcharge Settings Routes
+# ============================================================
+
+@app.get("/api/restaurant/{restaurant_id}/surcharge-settings", summary="Get Surcharge Settings")
+async def get_surcharge_settings(restaurant_id: str):
+    """
+    Get credit card surcharge settings for a restaurant
+    """
+    try:
+        restaurant = restaurant_service.get_restaurant_by_id(restaurant_id)
+        if not restaurant:
+            raise HTTPException(status_code=404, detail="Restaurant not found")
+
+        return {
+            "success": True,
+            "restaurant_id": restaurant_id,
+            "credit_card_surcharge_enabled": restaurant.get("credit_card_surcharge_enabled", False),
+            "credit_card_surcharge_rate": float(restaurant.get("credit_card_surcharge_rate", 2.50) or 2.50)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/restaurant/{restaurant_id}/surcharge-settings", summary="Update Surcharge Settings")
+async def update_surcharge_settings(restaurant_id: str, request: UpdateSurchargeSettingsRequest):
+    """
+    Update credit card surcharge settings for a restaurant
+
+    Args:
+        credit_card_surcharge_enabled: Whether to pass credit card fees to customer
+        credit_card_surcharge_rate: Surcharge rate as percentage (e.g., 2.5 for 2.5%)
+    """
+    try:
+        restaurant = restaurant_service.get_restaurant_by_id(restaurant_id)
+        if not restaurant:
+            raise HTTPException(status_code=404, detail="Restaurant not found")
+
+        update_data = {}
+
+        if request.credit_card_surcharge_enabled is not None:
+            update_data["credit_card_surcharge_enabled"] = request.credit_card_surcharge_enabled
+
+        if request.credit_card_surcharge_rate is not None:
+            # Validate rate is between 0 and 10%
+            if request.credit_card_surcharge_rate < 0 or request.credit_card_surcharge_rate > 10:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Surcharge rate must be between 0 and 10%"
+                )
+            update_data["credit_card_surcharge_rate"] = request.credit_card_surcharge_rate
+
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        # Save to database
+        if not restaurant_service.supabase_client:
+            raise HTTPException(status_code=500, detail="Database connection not available")
+
+        result = restaurant_service.supabase_client.table("restaurants").update(
+            update_data
+        ).eq("id", restaurant_id).execute()
+
+        return {
+            "success": True,
+            "restaurant_id": restaurant_id,
+            "credit_card_surcharge_enabled": update_data.get(
+                "credit_card_surcharge_enabled",
+                restaurant.get("credit_card_surcharge_enabled", False)
+            ),
+            "credit_card_surcharge_rate": update_data.get(
+                "credit_card_surcharge_rate",
+                float(restaurant.get("credit_card_surcharge_rate", 2.50) or 2.50)
+            ),
+            "message": "Surcharge settings updated successfully"
         }
 
     except HTTPException:
@@ -2398,7 +2568,15 @@ async def update_user_profile(request: UpdateProfileRequest):
                     status_code=400,
                     detail=f"Invalid menu template. Must be one of: {', '.join(valid_templates)}"
                 )
-        
+
+        # Tax/Business info for NZ
+        if request.gst_registered is not None:
+            update_data['gst_registered'] = request.gst_registered
+        if request.gst_number is not None:
+            update_data['gst_number'] = request.gst_number
+        if request.ird_number is not None:
+            update_data['ird_number'] = request.ird_number
+
         # Update in database using restaurant_service
         if not update_data:
             raise HTTPException(
@@ -4644,6 +4822,571 @@ async def get_restaurant_location(restaurant_id: str):
     except Exception as e:
         print(f"❌ Get location error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Super Admin Dashboard API Endpoints
+# ============================================================
+
+@app.get("/api/admin/overview", summary="Get Platform Overview Stats")
+async def admin_get_overview(admin_user_id: str):
+    """Get platform-wide statistics for admin dashboard"""
+    result = admin_service.get_platform_overview(admin_user_id)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/users/list", summary="Get All Users (Admin)")
+async def admin_get_users(
+    admin_user_id: str,
+    page: int = 1,
+    limit: int = 20,
+    search: Optional[str] = None,
+    role_filter: Optional[str] = None
+):
+    """Get all users with detailed info for admin"""
+    result = admin_service.get_all_users_detailed(admin_user_id, page, limit, search, role_filter)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+class AdminUpdateUserRequest(BaseModel):
+    admin_user_id: str
+    target_user_id: str
+    role: Optional[str] = None
+    plan: Optional[str] = None
+    email: Optional[str] = None
+    restaurant_name: Optional[str] = None
+    subscription_status: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@app.post("/api/admin/users/update", summary="Update User (Admin)")
+async def admin_update_user(request: AdminUpdateUserRequest):
+    """Update user profile as admin"""
+    updates = {}
+    if request.role:
+        updates['role'] = request.role
+    if request.plan:
+        updates['plan'] = request.plan
+    if request.email:
+        updates['email'] = request.email
+    if request.restaurant_name:
+        updates['restaurant_name'] = request.restaurant_name
+    if request.subscription_status:
+        updates['subscription_status'] = request.subscription_status
+    if request.is_active is not None:
+        updates['is_active'] = request.is_active
+
+    result = admin_service.update_user(request.admin_user_id, request.target_user_id, updates)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.delete("/api/admin/users/{target_user_id}", summary="Delete User (Admin)")
+async def admin_delete_user(target_user_id: str, admin_user_id: str):
+    """Delete user as admin"""
+    result = admin_service.delete_user(admin_user_id, target_user_id)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/users/{target_user_id}", summary="Get User Detail (Admin)")
+async def admin_get_user_detail(target_user_id: str, admin_user_id: str):
+    """Get detailed user info as admin - includes all customer data, restaurants, stats"""
+    result = admin_service.get_user_detail(admin_user_id, target_user_id)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/restaurants/list", summary="Get All Restaurants (Admin)")
+async def admin_get_restaurants(
+    admin_user_id: str,
+    page: int = 1,
+    limit: int = 20,
+    search: Optional[str] = None,
+    is_active: Optional[bool] = None
+):
+    """Get all restaurants for admin"""
+    result = admin_service.get_all_restaurants(admin_user_id, page, limit, search, is_active)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+class AdminUpdateRestaurantRequest(BaseModel):
+    admin_user_id: str
+    restaurant_id: str
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+    gst_registered: Optional[bool] = None
+    gst_number: Optional[str] = None
+
+
+@app.post("/api/admin/restaurants/update", summary="Update Restaurant (Admin)")
+async def admin_update_restaurant(request: AdminUpdateRestaurantRequest):
+    """Update restaurant as admin"""
+    updates = {}
+    if request.name is not None:
+        updates['name'] = request.name
+    if request.is_active is not None:
+        updates['is_active'] = request.is_active
+    if request.gst_registered is not None:
+        updates['gst_registered'] = request.gst_registered
+    if request.gst_number is not None:
+        updates['gst_number'] = request.gst_number
+
+    result = admin_service.update_restaurant(request.admin_user_id, request.restaurant_id, updates)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/orders/list", summary="Get All Orders (Admin)")
+async def admin_get_orders(
+    admin_user_id: str,
+    page: int = 1,
+    limit: int = 20,
+    status: Optional[str] = None,
+    payment_status: Optional[str] = None,
+    restaurant_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None
+):
+    """Get all orders platform-wide for admin"""
+    result = admin_service.get_all_orders(admin_user_id, page, limit, status, payment_status, restaurant_id, date_from, date_to)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+class AdminUpdateOrderRequest(BaseModel):
+    admin_user_id: str
+    order_id: str
+    status: Optional[str] = None
+    payment_status: Optional[str] = None
+
+
+@app.post("/api/admin/orders/update", summary="Update Order Status (Admin)")
+async def admin_update_order(request: AdminUpdateOrderRequest):
+    """Update order status as admin"""
+    result = admin_service.update_order_status(request.admin_user_id, request.order_id, request.status, request.payment_status)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/payments/list", summary="Get Payment Logs (Admin)")
+async def admin_get_payments(
+    admin_user_id: str,
+    page: int = 1,
+    limit: int = 20,
+    status: Optional[str] = None,
+    restaurant_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None
+):
+    """Get payment logs for admin"""
+    result = admin_service.get_payment_logs(admin_user_id, page, limit, status, restaurant_id, date_from, date_to)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/payments/summary", summary="Get Payment Summary (Admin)")
+async def admin_get_payment_summary(admin_user_id: str, period: str = "month"):
+    """Get payment summary stats for admin"""
+    result = admin_service.get_payment_summary(admin_user_id, period)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/coupons/list", summary="Get All Coupons (Admin)")
+async def admin_get_coupons(
+    admin_user_id: str,
+    page: int = 1,
+    limit: int = 20,
+    is_active: Optional[bool] = None,
+    restaurant_id: Optional[str] = None
+):
+    """Get all coupons for admin"""
+    result = admin_service.get_all_coupons(admin_user_id, page, limit, is_active, restaurant_id)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+class AdminCreateCouponRequest(BaseModel):
+    admin_user_id: str
+    code: str
+    name: str
+    description: Optional[str] = None
+    discount_type: str  # 'percentage' or 'fixed_amount'
+    discount_value: float
+    min_order_amount: float = 0
+    max_discount_amount: Optional[float] = None
+    usage_limit: Optional[int] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    is_active: bool = True
+    applies_to: str = 'all'  # 'all', 'dine_in', 'pickup', 'delivery'
+    restaurant_id: Optional[str] = None  # None = global coupon
+
+
+@app.post("/api/admin/coupons/create", summary="Create Coupon (Admin)")
+async def admin_create_coupon(request: AdminCreateCouponRequest):
+    """Create new coupon as admin"""
+    coupon_data = {
+        'code': request.code.upper(),
+        'name': request.name,
+        'description': request.description,
+        'discount_type': request.discount_type,
+        'discount_value': request.discount_value,
+        'min_order_amount': request.min_order_amount,
+        'max_discount_amount': request.max_discount_amount,
+        'usage_limit': request.usage_limit,
+        'start_date': request.start_date,
+        'end_date': request.end_date,
+        'is_active': request.is_active,
+        'applies_to': request.applies_to,
+        'restaurant_id': request.restaurant_id
+    }
+    result = admin_service.create_coupon(request.admin_user_id, coupon_data)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+class AdminUpdateCouponRequest(BaseModel):
+    admin_user_id: str
+    coupon_id: str
+    code: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    discount_type: Optional[str] = None
+    discount_value: Optional[float] = None
+    min_order_amount: Optional[float] = None
+    max_discount_amount: Optional[float] = None
+    usage_limit: Optional[int] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    is_active: Optional[bool] = None
+    applies_to: Optional[str] = None
+
+
+@app.post("/api/admin/coupons/update", summary="Update Coupon (Admin)")
+async def admin_update_coupon(request: AdminUpdateCouponRequest):
+    """Update coupon as admin"""
+    updates = {k: v for k, v in request.dict().items() if v is not None and k not in ['admin_user_id', 'coupon_id']}
+    if 'code' in updates:
+        updates['code'] = updates['code'].upper()
+    result = admin_service.update_coupon(request.admin_user_id, request.coupon_id, updates)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.delete("/api/admin/coupons/{coupon_id}", summary="Delete Coupon (Admin)")
+async def admin_delete_coupon(coupon_id: str, admin_user_id: str):
+    """Delete coupon as admin"""
+    result = admin_service.delete_coupon(admin_user_id, coupon_id)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+# ============================================================
+# Public Coupon Validation (for checkout page)
+# ============================================================
+
+class ValidateCouponRequest(BaseModel):
+    code: str
+    plan_id: Optional[str] = None
+    amount: float
+
+
+@app.post("/api/coupons/validate", summary="Validate Coupon Code")
+async def validate_coupon(request: ValidateCouponRequest):
+    """
+    Validate coupon code for checkout.
+    Returns discount information if valid.
+    """
+    try:
+        # Get coupon from database
+        result = supabase.table('coupons').select('*').eq('code', request.code.upper()).eq('is_active', True).execute()
+
+        if not result.data:
+            return {"valid": False, "message": "Invalid coupon code"}
+
+        coupon = result.data[0]
+
+        # Check if coupon has expired
+        from datetime import datetime
+        now = datetime.now()
+
+        if coupon.get('end_date'):
+            end_date = datetime.fromisoformat(coupon['end_date'].replace('Z', '+00:00'))
+            if now > end_date.replace(tzinfo=None):
+                return {"valid": False, "message": "Coupon has expired"}
+
+        if coupon.get('start_date'):
+            start_date = datetime.fromisoformat(coupon['start_date'].replace('Z', '+00:00'))
+            if now < start_date.replace(tzinfo=None):
+                return {"valid": False, "message": "Coupon is not yet active"}
+
+        # Check usage limit
+        if coupon.get('usage_limit') and coupon.get('used_count', 0) >= coupon['usage_limit']:
+            return {"valid": False, "message": "Coupon usage limit reached"}
+
+        # Check minimum order amount
+        if coupon.get('min_order_amount') and request.amount < coupon['min_order_amount']:
+            return {"valid": False, "message": f"Minimum order amount is ${coupon['min_order_amount']}"}
+
+        # Calculate discount
+        discount_type = coupon.get('discount_type', 'percentage')
+        discount_value = float(coupon.get('discount_value', 0))
+
+        if discount_type == 'percentage':
+            discount_amount = request.amount * (discount_value / 100)
+            # Apply max discount cap if set
+            if coupon.get('max_discount_amount'):
+                discount_amount = min(discount_amount, float(coupon['max_discount_amount']))
+        else:  # fixed_amount
+            discount_amount = min(discount_value, request.amount)
+
+        return {
+            "valid": True,
+            "code": coupon['code'],
+            "name": coupon.get('name', ''),
+            "discount_type": discount_type,
+            "discount_value": discount_value,
+            "discount_amount": round(discount_amount, 2),
+            "message": "Coupon applied successfully"
+        }
+
+    except Exception as e:
+        return {"valid": False, "message": f"Error validating coupon: {str(e)}"}
+
+
+@app.get("/api/admin/logs", summary="Get Admin Activity Logs")
+async def admin_get_logs(
+    admin_user_id: str,
+    page: int = 1,
+    limit: int = 50,
+    action_filter: Optional[str] = None,
+    target_type: Optional[str] = None
+):
+    """Get admin activity logs"""
+    result = admin_service.get_activity_logs(admin_user_id, page, limit, action_filter, target_type)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/staff/list", summary="Get All Staff (Admin)")
+async def admin_get_staff(
+    admin_user_id: str,
+    page: int = 1,
+    limit: int = 20,
+    restaurant_id: Optional[str] = None,
+    role: Optional[str] = None
+):
+    """Get all staff across all restaurants for admin"""
+    result = admin_service.get_all_staff(admin_user_id, page, limit, restaurant_id, role)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+# ==================== BANK TRANSFER APPROVAL ENDPOINTS ====================
+
+@app.get("/api/admin/payments/pending", summary="Get Pending Bank Transfer Approvals")
+async def admin_get_pending_approvals(admin_user_id: str):
+    """Get all pending bank transfer payments awaiting admin approval"""
+    result = admin_service.get_pending_approvals(admin_user_id)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+class ApproveBankTransferRequest(BaseModel):
+    admin_user_id: str
+    payment_log_id: str
+    notes: Optional[str] = None
+
+
+@app.post("/api/admin/payments/approve", summary="Approve Bank Transfer Payment")
+async def admin_approve_bank_transfer(request: ApproveBankTransferRequest):
+    """Approve a bank transfer payment and activate the user's subscription"""
+    result = admin_service.approve_bank_transfer(
+        request.admin_user_id,
+        request.payment_log_id,
+        request.notes
+    )
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+class RejectBankTransferRequest(BaseModel):
+    admin_user_id: str
+    payment_log_id: str
+    reason: str
+
+
+@app.post("/api/admin/payments/reject", summary="Reject Bank Transfer Payment")
+async def admin_reject_bank_transfer(request: RejectBankTransferRequest):
+    """Reject a bank transfer payment with a reason"""
+    result = admin_service.reject_bank_transfer(
+        request.admin_user_id,
+        request.payment_log_id,
+        request.reason
+    )
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+# ==================== SUBSCRIPTION MANAGEMENT ENDPOINTS ====================
+
+class ExtendSubscriptionRequest(BaseModel):
+    admin_user_id: str
+    target_user_id: str
+    extension_days: int
+    reason: Optional[str] = None
+
+
+@app.post("/api/admin/subscriptions/extend", summary="Extend User Subscription")
+async def admin_extend_subscription(request: ExtendSubscriptionRequest):
+    """Extend a user's subscription by a specified number of days"""
+    result = admin_service.extend_subscription(
+        request.admin_user_id,
+        request.target_user_id,
+        request.extension_days,
+        request.reason
+    )
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+class ChangePlanRequest(BaseModel):
+    admin_user_id: str
+    target_user_id: str
+    new_plan: str
+    reason: Optional[str] = None
+    billing_interval: Optional[str] = 'monthly'  # 'monthly' or 'yearly'
+
+
+@app.post("/api/admin/subscriptions/change-plan", summary="Change User Plan")
+async def admin_change_plan(request: ChangePlanRequest):
+    """Change a user's subscription plan and set subscription dates automatically"""
+    result = admin_service.change_user_plan(
+        request.admin_user_id,
+        request.target_user_id,
+        request.new_plan,
+        request.reason,
+        request.billing_interval or 'monthly'
+    )
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+class CancelSubscriptionRequest(BaseModel):
+    admin_user_id: str
+    target_user_id: str
+    reason: Optional[str] = None
+    immediate: bool = False
+
+
+@app.post("/api/admin/subscriptions/cancel", summary="Cancel User Subscription")
+async def admin_cancel_subscription(request: CancelSubscriptionRequest):
+    """Cancel a user's subscription"""
+    result = admin_service.cancel_subscription(
+        request.admin_user_id,
+        request.target_user_id,
+        request.reason,
+        request.immediate
+    )
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/subscriptions/expiring", summary="Get Expiring Subscriptions")
+async def admin_get_expiring_subscriptions(admin_user_id: str, days: int = 7):
+    """Get subscriptions expiring within the specified number of days"""
+    result = admin_service.get_expiring_subscriptions(admin_user_id, days)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+# ==================== ADMIN NOTIFICATIONS ENDPOINT ====================
+
+@app.get("/api/admin/notifications", summary="Get Admin Notifications")
+async def admin_get_notifications(admin_user_id: str):
+    """Get admin dashboard notifications (pending approvals, expiring subscriptions, etc.)"""
+    result = admin_service.get_admin_notifications(admin_user_id)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+# ==================== REPORTS ENDPOINTS ====================
+
+@app.get("/api/admin/reports/subscriptions", summary="Get Subscription Report")
+async def admin_get_subscription_report(admin_user_id: str):
+    """Get subscription statistics and MRR/ARR metrics"""
+    result = admin_service.get_subscription_report(admin_user_id)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+@app.get("/api/admin/reports/revenue", summary="Get Revenue Report")
+async def admin_get_revenue_report(admin_user_id: str, period: str = "month"):
+    """Get revenue report with breakdown by plan and payment method"""
+    result = admin_service.get_revenue_report(admin_user_id, period)
+    if "error" in result:
+        raise HTTPException(status_code=403 if "Access denied" in result["error"] else 500, detail=result["error"])
+    return result
+
+
+# ==================== USER BANK TRANSFER SUBMISSION ENDPOINT ====================
+
+class SubmitBankTransferRequest(BaseModel):
+    user_id: str
+    plan: str
+    amount: float
+    billing_interval: str = "monthly"
+    slip_url: Optional[str] = None
+    reference: Optional[str] = None
+    bank_name: Optional[str] = None
+
+
+@app.post("/api/payments/bank-transfer/submit", summary="Submit Bank Transfer Payment")
+async def submit_bank_transfer(request: SubmitBankTransferRequest):
+    """Submit a bank transfer payment for admin approval"""
+    result = admin_service.submit_bank_transfer(
+        request.user_id,
+        request.plan,
+        request.amount,
+        request.billing_interval,
+        request.slip_url,
+        request.reference,
+        request.bank_name
+    )
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+    return result
 
 
 if __name__ == "__main__":

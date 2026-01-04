@@ -112,6 +112,12 @@ export default function RestaurantMenuPage() {
   // Restaurant plan for language restrictions
   const [restaurantPlan, setRestaurantPlan] = useState<string>('free_trial');
 
+  // Credit card surcharge settings
+  const [surchargeSettings, setSurchargeSettings] = useState({
+    credit_card_surcharge_enabled: false,
+    credit_card_surcharge_rate: 2.50
+  });
+
   // Language selection for customers
   const [selectedLanguage, setSelectedLanguage] = useState<string>('original'); // 'original', 'en', 'th', 'zh', 'ja', 'ko'
   const [translatingMenu, setTranslatingMenu] = useState(false);
@@ -244,6 +250,22 @@ export default function RestaurantMenuPage() {
             }
           } catch (err) {
             console.log('Could not fetch restaurant location:', err);
+          }
+
+          // Fetch credit card surcharge settings
+          try {
+            const surchargeResponse = await fetch(`${API_URL}/api/restaurant/${data.restaurant.id}/surcharge-settings`);
+            if (surchargeResponse.ok) {
+              const surchargeData = await surchargeResponse.json();
+              if (surchargeData.success) {
+                setSurchargeSettings({
+                  credit_card_surcharge_enabled: surchargeData.credit_card_surcharge_enabled || false,
+                  credit_card_surcharge_rate: surchargeData.credit_card_surcharge_rate || 2.50
+                });
+              }
+            }
+          } catch (err) {
+            console.log('Could not fetch surcharge settings:', err);
           }
         }
 
@@ -728,8 +750,23 @@ export default function RestaurantMenuPage() {
     return serviceType === 'delivery' ? selectedDeliveryFee : 0;
   };
 
+  // Calculate credit card surcharge (Service Fee)
+  const getSurchargeAmount = () => {
+    if (!surchargeSettings.credit_card_surcharge_enabled) {
+      return 0;
+    }
+    const subtotalWithDelivery = getSubtotal() + getDeliveryFee();
+    return Math.round(subtotalWithDelivery * surchargeSettings.credit_card_surcharge_rate) / 100;
+  };
+
   const getTotalPrice = () => {
-    return getSubtotal() + getDeliveryFee();
+    return getSubtotal() + getDeliveryFee() + getSurchargeAmount();
+  };
+
+  // Calculate GST from inclusive price (NZ standard: 15% GST, formula: total * 3 / 23)
+  const getGstAmount = () => {
+    const total = getTotalPrice();
+    return Math.round(total * 3 / 23 * 100) / 100; // Round to 2 decimal places
   };
 
   const handlePlaceOrder = async () => {
@@ -822,6 +859,8 @@ export default function RestaurantMenuPage() {
           tax: 0, // Can be calculated later
           delivery_fee: serviceType === 'delivery' ? getDeliveryFee() : 0,
           subtotal: getSubtotal(),
+          surcharge_amount: getSurchargeAmount(),
+          payment_method: 'card', // Default to card, will be updated in payment flow
         }),
       });
       
@@ -1161,6 +1200,7 @@ export default function RestaurantMenuPage() {
                   groupedMenus={groupedMenus}
                   themeColor={themeColor}
                   onItemClick={openItemModal}
+                  selectedLanguage={selectedLanguage}
                 />
               )}
               {menuTemplate === 'grid' && (
@@ -1178,6 +1218,7 @@ export default function RestaurantMenuPage() {
                   groupedMenus={groupedMenus}
                   themeColor={themeColor}
                   onItemClick={openItemModal}
+                  selectedLanguage={selectedLanguage}
                 />
               )}
               {menuTemplate === 'elegant' && (
@@ -1186,6 +1227,7 @@ export default function RestaurantMenuPage() {
                   groupedMenus={groupedMenus}
                   themeColor={themeColor}
                   onItemClick={openItemModal}
+                  selectedLanguage={selectedLanguage}
                 />
               )}
               {menuTemplate === 'casual' && (
@@ -1194,6 +1236,7 @@ export default function RestaurantMenuPage() {
                   groupedMenus={groupedMenus}
                   themeColor={themeColor}
                   onItemClick={openItemModal}
+                  selectedLanguage={selectedLanguage}
                 />
               )}
             </div>
@@ -1402,19 +1445,21 @@ export default function RestaurantMenuPage() {
                           <div className="flex items-center gap-3">
                             <button
                               onClick={() => updateQuantity(item.menu_id, -1)}
-                              className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
+                              className="w-8 h-8 rounded-full text-white flex items-center justify-center transition-opacity hover:opacity-80"
+                              style={{ backgroundColor: themeColor }}
                             >
                               <Minus className="w-4 h-4" />
                             </button>
                             <span className="font-semibold text-gray-900">{item.quantity}</span>
                             <button
                               onClick={() => updateQuantity(item.menu_id, 1)}
-                              className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
+                              className="w-8 h-8 rounded-full text-white flex items-center justify-center transition-opacity hover:opacity-80"
+                              style={{ backgroundColor: themeColor }}
                             >
                               <Plus className="w-4 h-4" />
                             </button>
                           </div>
-                          <span className="font-bold text-orange-500">
+                          <span className="font-bold" style={{ color: themeColor }}>
                             ${(item.price * item.quantity).toFixed(2)}
                           </span>
                         </div>
@@ -1694,12 +1739,30 @@ export default function RestaurantMenuPage() {
                       </div>
                     )}
 
+                    {/* Service Fee (Credit Card Surcharge) */}
+                    {surchargeSettings.credit_card_surcharge_enabled && getSurchargeAmount() > 0 && (
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-gray-600">
+                          Service Fee ({surchargeSettings.credit_card_surcharge_rate}%):
+                        </span>
+                        <span className="text-gray-900 font-medium">
+                          ${getSurchargeAmount().toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Grand Total */}
-                    <div className="flex justify-between items-center mb-4 pt-2 border-t border-gray-100">
+                    <div className="flex justify-between items-center pt-2 border-t border-gray-100">
                       <span className="text-xl font-bold text-gray-900">Total:</span>
                       <span className="text-2xl font-bold text-orange-500">
                         ${getTotalPrice().toFixed(2)} NZD
                       </span>
+                    </div>
+
+                    {/* GST Information */}
+                    <div className="flex justify-between items-center text-sm text-gray-500 mb-4">
+                      <span>Incl. GST (15%):</span>
+                      <span>${getGstAmount().toFixed(2)}</span>
                     </div>
                     <button
                       onClick={handlePlaceOrder}

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   ChefHat, Bell, Volume2, VolumeX, Clock, CheckCircle,
   AlertTriangle, LogOut, RefreshCw, Loader2, Timer,
-  Utensils, Coffee, Users, XCircle, X
+  Utensils, Coffee, Users, XCircle, X, Printer
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { t, tBilingual, mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
@@ -79,8 +79,14 @@ export default function KitchenDisplayPage() {
   const [translatedTexts, setTranslatedTexts] = useState<Record<string, string>>({});
   const [lang, setLang] = useState<POSLanguage>('th');
 
-  // Theme state
-  const [posTheme, setPosTheme] = useState<POSTheme>('orange');
+  // Theme state - load from localStorage first for instant display
+  const [posTheme, setPosTheme] = useState<POSTheme>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pos_theme');
+      if (saved) return saved as POSTheme;
+    }
+    return 'orange';
+  });
   const themeClasses = getThemeClasses(posTheme);
 
   // Void order states
@@ -231,6 +237,7 @@ export default function KitchenDisplayPage() {
       }
       if (data?.pos_theme_color) {
         setPosTheme(data.pos_theme_color as POSTheme);
+        localStorage.setItem('pos_theme', data.pos_theme_color);
       }
     } catch (error) {
       console.error('Failed to fetch restaurant settings:', error);
@@ -316,7 +323,9 @@ export default function KitchenDisplayPage() {
             setLang(mapToPOSLanguage(newLang));
           }
           if (payload.new && (payload.new as any).pos_theme_color) {
-            setPosTheme((payload.new as any).pos_theme_color as POSTheme);
+            const newTheme = (payload.new as any).pos_theme_color as POSTheme;
+            setPosTheme(newTheme);
+            localStorage.setItem('pos_theme', newTheme);
           }
         }
       )
@@ -424,6 +433,135 @@ export default function KitchenDisplayPage() {
     setVoidingOrder(order);
     setVoidReason('');
     setShowVoidModal(true);
+  };
+
+  // Print kitchen ticket (optimized for 80mm thermal printers)
+  const printKitchenTicket = (order: Order) => {
+    const printWindow = window.open('', '', 'width=320,height=600');
+    if (!printWindow) {
+      alert('Please allow popups to print');
+      return;
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Kitchen - ${order.id.slice(0, 8).toUpperCase()}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          @page { size: 80mm auto; margin: 0; }
+          body {
+            font-family: 'Courier New', Courier, monospace;
+            width: 80mm;
+            padding: 3mm;
+            font-size: 12px;
+            background: white;
+            color: black;
+          }
+          .order-number {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            border: 3px solid black;
+            padding: 3mm;
+            margin-bottom: 3mm;
+          }
+          .order-type {
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            text-transform: uppercase;
+            background: black;
+            color: white;
+            padding: 2mm;
+            margin-bottom: 3mm;
+          }
+          .info { font-size: 11px; margin-bottom: 3mm; }
+          .info p { margin: 1mm 0; }
+          .items { border-top: 2px solid black; padding-top: 3mm; }
+          .item {
+            font-size: 14px;
+            font-weight: bold;
+            margin: 3mm 0;
+            padding-bottom: 2mm;
+            border-bottom: 1px dashed #ccc;
+          }
+          .item-qty { font-size: 16px; }
+          .modifier {
+            font-size: 12px;
+            font-weight: normal;
+            padding-left: 5mm;
+            margin: 1mm 0;
+          }
+          .special {
+            background: #f0f0f0;
+            border: 3px solid black;
+            padding: 3mm;
+            margin: 3mm 0;
+            font-size: 14px;
+            font-weight: bold;
+          }
+          .time {
+            text-align: center;
+            font-size: 11px;
+            margin-top: 3mm;
+            padding-top: 2mm;
+            border-top: 1px dashed black;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="order-number">
+          #${order.id.slice(0, 8).toUpperCase()}
+        </div>
+
+        <div class="order-type">
+          ${order.service_type === 'dine_in' ? 'DINE IN' : order.service_type === 'pickup' ? 'PICKUP' : 'DELIVERY'}
+        </div>
+
+        <div class="info">
+          ${order.table_no ? `<p><strong>TABLE: ${order.table_no}</strong></p>` : ''}
+          ${order.customer_name ? `<p>Customer: ${order.customer_name}</p>` : ''}
+        </div>
+
+        <div class="items">
+          ${order.items.map(item => `
+            <div class="item">
+              <span class="item-qty">${item.quantity}x</span> ${item.name}
+              ${item.selectedMeat ? `<div class="modifier">+ ${item.selectedMeat}</div>` : ''}
+              ${item.selectedAddOns?.length ? `<div class="modifier">+ ${item.selectedAddOns.join(', ')}</div>` : ''}
+              ${item.notes ? `<div class="modifier">"${item.notes}"</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+
+        ${order.special_instructions ? `
+          <div class="special">
+            NOTE: ${order.special_instructions}
+          </div>
+        ` : ''}
+
+        <div class="time">
+          ${new Date(order.created_at).toLocaleString('en-NZ', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+          })}
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.close();
+            }, 250);
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   // Logout
@@ -673,6 +811,14 @@ export default function KitchenDisplayPage() {
                 {/* Action Buttons */}
                 <div className="p-3 bg-slate-700/30 flex gap-2">
                   {/* Void Button - always visible for pending/confirmed orders */}
+                  {/* Print Kitchen Ticket Button */}
+                  <button
+                    onClick={() => printKitchenTicket(order)}
+                    className="px-3 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg font-semibold transition-colors flex items-center justify-center"
+                    title={lang === 'th' ? 'พิมพ์ใบสั่งครัว' : 'Print Ticket'}
+                  >
+                    <Printer className="w-5 h-5" />
+                  </button>
                   {(order.status === 'pending' || order.status === 'confirmed') && (
                     <button
                       onClick={() => openVoidModal(order)}
