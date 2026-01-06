@@ -20,10 +20,46 @@ interface ClassicListProps {
   groupedMenus: Record<string, MenuItem[]>;
   themeColor: string;
   onItemClick: (item: MenuItem) => void;
+  selectedLanguage?: string;
 }
 
-export default function ClassicList({ menus, groupedMenus, themeColor, onItemClick }: ClassicListProps) {
+// Translations for UI elements
+const translations: Record<string, Record<string, string>> = {
+  bestseller: {
+    'original': 'สินค้าขายดี', 'th': 'สินค้าขายดี', 'en': 'Bestseller', 'zh': '畅销品',
+    'ja': 'ベストセラー', 'ko': '베스트셀러', 'vi': 'Bán chạy nhất', 'hi': 'बेस्टसेलर',
+    'es': 'Más vendido', 'fr': 'Meilleures ventes', 'de': 'Bestseller', 'id': 'Terlaris', 'ms': 'Terlaris',
+  },
+  popularDishes: {
+    'original': 'เมนูยอดนิยม', 'th': 'เมนูยอดนิยม', 'en': 'Popular dishes', 'zh': '热门菜品',
+    'ja': '人気料理', 'ko': '인기 메뉴', 'vi': 'Món phổ biến', 'hi': 'लोकप्रिय व्यंजन',
+    'es': 'Platos populares', 'fr': 'Plats populaires', 'de': 'Beliebte Gerichte', 'id': 'Hidangan Populer', 'ms': 'Hidangan Popular',
+  },
+  bestSellerBadge: {
+    'original': 'ขายดี', 'th': 'ขายดี', 'en': 'Best Seller', 'zh': '热卖',
+    'ja': '人気', 'ko': '인기', 'vi': 'Bán chạy', 'hi': 'बेस्ट सेलर',
+    'es': 'Más vendido', 'fr': 'Best Seller', 'de': 'Bestseller', 'id': 'Terlaris', 'ms': 'Terlaris',
+  },
+  add: {
+    'original': 'เพิ่ม', 'th': 'เพิ่ม', 'en': 'Add', 'zh': '添加',
+    'ja': '追加', 'ko': '추가', 'vi': 'Thêm', 'hi': 'जोड़ें',
+    'es': 'Añadir', 'fr': 'Ajouter', 'de': 'Hinzufügen', 'id': 'Tambah', 'ms': 'Tambah',
+  },
+  choiceOfMeats: {
+    'original': 'เลือกเนื้อ', 'th': 'เลือกเนื้อ', 'en': 'Choice of meats', 'zh': '可选肉类',
+    'ja': '肉の選択', 'ko': '고기 선택', 'vi': 'Chọn thịt', 'hi': 'मांस का चयन',
+    'es': 'Elección de carnes', 'fr': 'Choix de viandes', 'de': 'Fleischauswahl', 'id': 'Pilihan daging', 'ms': 'Pilihan daging',
+  },
+  addOnsAvailable: {
+    'original': 'เพิ่มเติม', 'th': 'เพิ่มเติม', 'en': 'add-ons available', 'zh': '可加配料',
+    'ja': '追加可能', 'ko': '추가 가능', 'vi': 'có thể thêm', 'hi': 'ऐड-ऑन उपलब्ध',
+    'es': 'complementos disponibles', 'fr': 'suppléments disponibles', 'de': 'Extras verfügbar', 'id': 'tersedia tambahan', 'ms': 'tambahan tersedia',
+  },
+};
+
+export default function ClassicList({ menus, groupedMenus, themeColor, onItemClick, selectedLanguage = 'original' }: ClassicListProps) {
   const isBestsellerCategory = (category: string) => category.toLowerCase() === 'bestseller';
+  const t = (key: keyof typeof translations) => translations[key][selectedLanguage] || translations[key]['en'];
 
   return (
     <div className="space-y-12">
@@ -36,8 +72,8 @@ export default function ClassicList({ menus, groupedMenus, themeColor, onItemCli
           >
             <h2 className={`text-3xl font-bold flex items-center gap-3 ${isBestsellerCategory(category) ? 'text-orange-600' : 'text-gray-900'}`}>
               {isBestsellerCategory(category) && <Flame className="w-8 h-8 text-orange-500 fill-orange-500" />}
-              {isBestsellerCategory(category) ? 'Bestseller' : category}
-              {isBestsellerCategory(category) && <span className="text-lg font-normal text-orange-500">Popular dishes</span>}
+              {isBestsellerCategory(category) ? t('bestseller') : category}
+              {isBestsellerCategory(category) && <span className="text-lg font-normal text-orange-500">{t('popularDishes')}</span>}
             </h2>
           </div>
 
@@ -67,12 +103,12 @@ export default function ClassicList({ menus, groupedMenus, themeColor, onItemCli
                       {/* Name with Best Seller Badge */}
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="text-lg font-bold text-gray-900">
-                          {menu.name}
+                          {selectedLanguage === 'en' && menu.nameEn ? menu.nameEn : menu.name}
                         </h3>
                         {menu.is_best_seller && (
                           <span className="inline-flex items-center px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-xs font-semibold">
                             <Star className="w-3 h-3 mr-1 fill-current" />
-                            Best Seller
+                            {t('bestSellerBadge')}
                           </span>
                         )}
                       </div>
@@ -80,16 +116,16 @@ export default function ClassicList({ menus, groupedMenus, themeColor, onItemCli
                       {/* Description */}
                       {menu.description && (
                         <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                          {menu.description}
+                          {selectedLanguage === 'en' && menu.descriptionEn ? menu.descriptionEn : menu.description}
                         </p>
                       )}
-                      
+
                       {/* Add-ons indicator */}
                       {(menu.meats && menu.meats.length > 0) || (menu.addOns && menu.addOns.length > 0) ? (
                         <p className="text-xs text-gray-500">
-                          {menu.meats && menu.meats.length > 0 && `Choice of ${menu.meats.length} meats`}
+                          {menu.meats && menu.meats.length > 0 && `${t('choiceOfMeats')} (${menu.meats.length})`}
                           {menu.meats && menu.meats.length > 0 && menu.addOns && menu.addOns.length > 0 && ' • '}
-                          {menu.addOns && menu.addOns.length > 0 && `${menu.addOns.length} add-ons available`}
+                          {menu.addOns && menu.addOns.length > 0 && `${menu.addOns.length} ${t('addOnsAvailable')}`}
                         </p>
                       ) : null}
                     </div>
@@ -108,7 +144,7 @@ export default function ClassicList({ menus, groupedMenus, themeColor, onItemCli
                         style={{ backgroundColor: themeColor }}
                       >
                         <Plus className="w-4 h-4" />
-                        Add
+                        {t('add')}
                       </button>
                     </div>
                   </div>

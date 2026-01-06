@@ -19,7 +19,10 @@ import {
   Sparkles,
   Wand2,
   Image as ImageIcon,
-  Upload
+  Upload,
+  ToggleLeft,
+  ToggleRight,
+  EyeOff
 } from 'lucide-react';
 import RestaurantSelector from '@/components/RestaurantSelector';
 import ImageGallery from '@/components/ImageGallery';
@@ -37,9 +40,10 @@ interface MenuItem {
   categoryEn?: string;
   photo_url?: string;
   image_url?: string;  // Backend uses image_url
-  meats?: Array<{name: string; nameEn?: string; price: string}>;
-  addOns?: Array<{name: string; nameEn?: string; price: string}>;
+  meats?: Array<{name: string; nameEn?: string; price: string; is_available?: boolean}>;
+  addOns?: Array<{name: string; nameEn?: string; price: string; is_available?: boolean}>;
   is_best_seller?: boolean;
+  is_active?: boolean;  // For temporarily hiding menu items
   created_at: string;
   updated_at?: string;
   restaurant_id?: string;
@@ -50,6 +54,7 @@ export default function MenusPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);  // For toggling menu active status
   const [editing, setEditing] = useState<MenuItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [restaurantId, setRestaurantId] = useState<string | null>(null);
@@ -67,8 +72,8 @@ export default function MenusPage() {
     price: '',
     category: '',
     photo_url: '',
-    meats: [] as Array<{name: string; nameEn?: string; price: string}>,
-    addOns: [] as Array<{name: string; nameEn?: string; price: string}>,
+    meats: [] as Array<{name: string; nameEn?: string; price: string; is_available?: boolean}>,
+    addOns: [] as Array<{name: string; nameEn?: string; price: string; is_available?: boolean}>,
     is_best_seller: false,
   });
   const [editImageFile, setEditImageFile] = useState<File | null>(null);
@@ -77,7 +82,7 @@ export default function MenusPage() {
   // Edit Image AI features
   const [userId, setUserId] = useState<string | null>(null);
   const [showEditImageGallery, setShowEditImageGallery] = useState(false);
-  const [editImageMode, setEditImageMode] = useState<'upload' | 'gallery' | 'generate' | 'enhance'>('upload');
+  const [editImageMode, setEditImageMode] = useState<'upload' | 'gallery' | 'generate' | 'enhance' | 'logo'>('upload');
   const [generatingImage, setGeneratingImage] = useState(false);
   const [enhancingImage, setEnhancingImage] = useState(false);
   const [applyingLogoOnly, setApplyingLogoOnly] = useState(false);
@@ -86,6 +91,8 @@ export default function MenusPage() {
   const [restaurantLogo, setRestaurantLogo] = useState<string | null>(null);
   const [logoOverlay, setLogoOverlay] = useState(false);
   const [logoPosition, setLogoPosition] = useState<'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right'>('top-right');
+  const [logoSize, setLogoSize] = useState<'small' | 'medium' | 'large'>('medium');
+  const [originalImageUrl, setOriginalImageUrl] = useState<string | null>(null); // Store original image before logo
 
   // Auto-translate states
   const [translatingMeatIdx, setTranslatingMeatIdx] = useState<number | null>(null);
@@ -306,8 +313,45 @@ export default function MenusPage() {
     }
   };
 
+  // Toggle menu item active status (temporarily hide/show)
+  const handleToggleActive = async (menu: MenuItem) => {
+    setToggling(menu.menu_id);
+
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const newActiveStatus = !menu.is_active;
+
+      const response = await fetch(`${API_URL}/api/menu/${menu.menu_id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...menu,
+          is_active: newActiveStatus,
+          restaurant_id: menu.restaurant_id || restaurantId || 'default',
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update menu status');
+      }
+
+      // Update state immediately for better UX
+      setMenus(menus.map(m =>
+        m.menu_id === menu.menu_id
+          ? { ...m, is_active: newActiveStatus }
+          : m
+      ));
+    } catch (err: any) {
+      alert('Failed to toggle menu status: ' + err.message);
+      console.error('Toggle error:', err);
+    } finally {
+      setToggling(null);
+    }
+  };
+
   const handleEdit = (menu: MenuItem) => {
     setEditing(menu);
+    const imageUrl = menu.photo_url || menu.image_url || '';
     setEditForm({
       name: menu.name || '',
       nameEn: menu.nameEn || '',
@@ -315,11 +359,12 @@ export default function MenusPage() {
       descriptionEn: menu.descriptionEn || '',
       price: menu.price || '',
       category: menu.category || '',
-      photo_url: menu.photo_url || menu.image_url || '',
+      photo_url: imageUrl,
       meats: (menu as any).meats || [],
       addOns: (menu as any).addOns || [],
       is_best_seller: menu.is_best_seller || false,
     });
+    setOriginalImageUrl(imageUrl); // Store original image for logo application
     setEditImageFile(null);
     setEditImageMode('upload');
     setAiPrompt('');
@@ -339,7 +384,8 @@ export default function MenusPage() {
       const logoConfig = logoOverlay && restaurantLogo ? {
         enabled: true,
         logo_url: restaurantLogo,
-        position: logoPosition
+        position: logoPosition,
+        size: logoSize
       } : undefined;
 
       const result = await generateFoodImage({
@@ -354,6 +400,7 @@ export default function MenusPage() {
       if (result.success && result.generated_image) {
         const imageUrl = (result as any).generated_image_url || result.generated_image;
         setEditForm({ ...editForm, photo_url: imageUrl });
+        setOriginalImageUrl(imageUrl); // Update original for logo application
         setEditImageFile(null);
       } else {
         alert(result.error || 'Failed to generate image');
@@ -391,7 +438,8 @@ export default function MenusPage() {
       const logoConfig = logoOverlay && restaurantLogo ? {
         enabled: true,
         logo_url: restaurantLogo,
-        position: logoPosition
+        position: logoPosition,
+        size: logoSize
       } : undefined;
 
       const result = await enhanceImage(
@@ -405,6 +453,7 @@ export default function MenusPage() {
       if (result.success && (result.enhanced_image_url || result.enhanced_image)) {
         const imageUrl = result.enhanced_image_url || result.enhanced_image || '';
         setEditForm({ ...editForm, photo_url: imageUrl });
+        setOriginalImageUrl(imageUrl); // Update original for logo application
         setEditImageFile(null);
       } else {
         alert(result.error || 'Failed to enhance image');
@@ -419,7 +468,10 @@ export default function MenusPage() {
 
   // Apply Logo Only (No AI Enhancement) for Edit
   const handleApplyLogoOnlyEdit = async () => {
-    if (!editForm.photo_url && !editImageFile) {
+    // Use original image URL to avoid stacking logos
+    const sourceImageUrl = originalImageUrl || editForm.photo_url;
+
+    if (!sourceImageUrl && !editImageFile) {
       alert('Please upload or select an image first');
       return;
     }
@@ -435,9 +487,15 @@ export default function MenusPage() {
 
       if (editImageFile) {
         imageFile = editImageFile;
-      } else if (editForm.photo_url) {
-        // Fetch existing image and convert to File
-        const response = await fetch(editForm.photo_url);
+        // Update original image when new file is uploaded
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setOriginalImageUrl(reader.result as string);
+        };
+        reader.readAsDataURL(editImageFile);
+      } else if (sourceImageUrl) {
+        // Fetch ORIGINAL image (without logo) and convert to File
+        const response = await fetch(sourceImageUrl);
         const blob = await response.blob();
         imageFile = new File([blob], 'image.jpg', { type: blob.type || 'image/jpeg' });
       } else {
@@ -447,13 +505,15 @@ export default function MenusPage() {
       const result = await applyLogoOnly(
         imageFile,
         restaurantLogo,
-        logoPosition
+        logoPosition,
+        logoSize
       );
 
       if (result.success && (result.image_url || result.image)) {
         const imageUrl = result.image_url || result.image || '';
         setEditForm({ ...editForm, photo_url: imageUrl });
         setEditImageFile(null);
+        // Keep originalImageUrl unchanged so subsequent logo applications use clean image
       } else {
         alert(result.error || 'Failed to apply logo');
       }
@@ -699,7 +759,7 @@ export default function MenusPage() {
                     <img
                       src={menu.photo_url || menu.image_url}
                       alt={menu.nameEn || menu.name}
-                      className="w-full h-full object-contain"
+                      className={`w-full h-full object-contain ${menu.is_active === false ? 'opacity-50 grayscale' : ''}`}
                     />
                     {/* Best Seller Badge */}
                     {menu.is_best_seller && (
@@ -708,9 +768,16 @@ export default function MenusPage() {
                         Best Seller
                       </div>
                     )}
+                    {/* Hidden Badge */}
+                    {menu.is_active === false && (
+                      <div className="absolute top-2 left-2 bg-gray-800 text-white px-2 py-1 rounded-full text-xs font-bold flex items-center gap-1 shadow-lg">
+                        <EyeOff className="w-3 h-3" />
+                        Hidden
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <div className="aspect-video bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center relative">
+                  <div className={`aspect-video bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center relative ${menu.is_active === false ? 'opacity-50 grayscale' : ''}`}>
                     <FileText className="w-16 h-16 text-white/50" />
                     {/* Best Seller Badge */}
                     {menu.is_best_seller && (
@@ -719,8 +786,43 @@ export default function MenusPage() {
                         Best Seller
                       </div>
                     )}
+                    {/* Hidden Badge */}
+                    {menu.is_active === false && (
+                      <div className="absolute top-2 left-2 bg-gray-800 text-white px-2 py-1 rounded-full text-xs font-bold flex items-center gap-1 shadow-lg">
+                        <EyeOff className="w-3 h-3" />
+                        Hidden
+                      </div>
+                    )}
                   </div>
                 )}
+
+                {/* Active Toggle - Top Bar */}
+                <div className={`flex items-center justify-between px-4 py-2 ${menu.is_active !== false ? 'bg-green-50' : 'bg-red-50'}`}>
+                  <div className="flex items-center gap-2">
+                    {menu.is_active !== false ? (
+                      <Eye className="w-4 h-4 text-green-600" />
+                    ) : (
+                      <EyeOff className="w-4 h-4 text-red-500" />
+                    )}
+                    <span className={`text-sm font-medium ${menu.is_active !== false ? 'text-green-600' : 'text-red-500'}`}>
+                      {menu.is_active !== false ? 'Visible on menu' : 'Hidden from menu'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleToggleActive(menu)}
+                    disabled={toggling === menu.menu_id}
+                    className="focus:outline-none"
+                    title={menu.is_active !== false ? 'Click to hide' : 'Click to show'}
+                  >
+                    {toggling === menu.menu_id ? (
+                      <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                    ) : menu.is_active !== false ? (
+                      <ToggleRight className="w-8 h-8 text-green-500 hover:text-green-600 transition-colors" />
+                    ) : (
+                      <ToggleLeft className="w-8 h-8 text-red-400 hover:text-red-500 transition-colors" />
+                    )}
+                  </button>
+                </div>
 
                 {/* Content */}
                 <div className="p-6">
@@ -757,7 +859,7 @@ export default function MenusPage() {
                   )}
 
                   {/* Date */}
-                  <div className="flex items-center text-xs text-gray-500 mb-4 pb-4 border-b">
+                  <div className="flex items-center text-xs text-gray-500 mb-4">
                     <Calendar className="w-3 h-3 mr-1" />
                     {formatDate(menu.created_at)}
                   </div>
@@ -1015,6 +1117,20 @@ export default function MenusPage() {
                     <Wand2 className="w-4 h-4" />
                     AI Enhance
                   </button>
+                  {restaurantLogo && (
+                    <button
+                      type="button"
+                      onClick={() => setEditImageMode('logo')}
+                      className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
+                        editImageMode === 'logo'
+                          ? 'bg-green-500 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                      Add Logo
+                    </button>
+                  )}
                 </div>
 
                 {/* Tab Content */}
@@ -1031,7 +1147,9 @@ export default function MenusPage() {
                             setEditImageFile(file);
                             const reader = new FileReader();
                             reader.onloadend = () => {
-                              setEditForm({ ...editForm, photo_url: reader.result as string });
+                              const dataUrl = reader.result as string;
+                              setEditForm({ ...editForm, photo_url: dataUrl });
+                              setOriginalImageUrl(dataUrl); // Update original for logo application
                             };
                             reader.readAsDataURL(file);
                           }
@@ -1122,6 +1240,87 @@ export default function MenusPage() {
                     </div>
                   )}
 
+                  {/* Add Logo Only Tab */}
+                  {editImageMode === 'logo' && (
+                    <div className="space-y-3">
+                      {!editForm.photo_url ? (
+                        <p className="text-sm text-amber-600">
+                          Upload or select an image first to add logo
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-sm text-gray-600 mb-3">
+                            Add your restaurant logo to the current image without any AI modifications
+                          </p>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Position</label>
+                            <select
+                              value={logoPosition}
+                              onChange={(e) => setLogoPosition(e.target.value as any)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white"
+                            >
+                              <option value="top-left">Top Left</option>
+                              <option value="top-center">Top Center</option>
+                              <option value="top-right">Top Right</option>
+                              <option value="bottom-left">Bottom Left</option>
+                              <option value="bottom-center">Bottom Center</option>
+                              <option value="bottom-right">Bottom Right</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Logo Size</label>
+                            <select
+                              value={logoSize}
+                              onChange={(e) => setLogoSize(e.target.value as any)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white"
+                            >
+                              <option value="small">Small (12%)</option>
+                              <option value="medium">Medium (18%) - Recommended</option>
+                              <option value="large">Large (25%)</option>
+                            </select>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={handleApplyLogoOnlyEdit}
+                              disabled={applyingLogoOnly}
+                              className="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                              {applyingLogoOnly ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  Applying...
+                                </>
+                              ) : (
+                                <>
+                                  <ImageIcon className="w-4 h-4" />
+                                  Apply Logo
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (originalImageUrl) {
+                                  setEditForm({ ...editForm, photo_url: originalImageUrl });
+                                }
+                              }}
+                              disabled={!originalImageUrl}
+                              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Remove logo and restore original image"
+                            >
+                              <X className="w-4 h-4" />
+                              No Logo
+                            </button>
+                          </div>
+                        </>
+                      )}
+                      <p className="text-xs text-gray-500">
+                        Only adds logo - no image enhancement or modifications
+                      </p>
+                    </div>
+                  )}
+
                   {/* Logo Overlay Option - Show for AI Generate/Enhance */}
                   {(editImageMode === 'generate' || editImageMode === 'enhance') && restaurantLogo && (
                     <div className="mt-4 pt-4 border-t border-gray-200">
@@ -1135,18 +1334,35 @@ export default function MenusPage() {
                         <span className="text-sm font-medium text-gray-700">Add Restaurant Logo</span>
                       </label>
                       {logoOverlay && (
-                        <select
-                          value={logoPosition}
-                          onChange={(e) => setLogoPosition(e.target.value as any)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white"
-                        >
-                          <option value="top-left">Top Left</option>
-                          <option value="top-center">Top Center</option>
-                          <option value="top-right">Top Right</option>
-                          <option value="bottom-left">Bottom Left</option>
-                          <option value="bottom-center">Bottom Center</option>
-                          <option value="bottom-right">Bottom Right</option>
-                        </select>
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Position</label>
+                            <select
+                              value={logoPosition}
+                              onChange={(e) => setLogoPosition(e.target.value as any)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white"
+                            >
+                              <option value="top-left">Top Left</option>
+                              <option value="top-center">Top Center</option>
+                              <option value="top-right">Top Right</option>
+                              <option value="bottom-left">Bottom Left</option>
+                              <option value="bottom-center">Bottom Center</option>
+                              <option value="bottom-right">Bottom Right</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Logo Size</label>
+                            <select
+                              value={logoSize}
+                              onChange={(e) => setLogoSize(e.target.value as any)}
+                              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white"
+                            >
+                              <option value="small">Small (12%)</option>
+                              <option value="medium">Medium (18%) - Recommended</option>
+                              <option value="large">Large (25%)</option>
+                            </select>
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}
@@ -1170,7 +1386,7 @@ export default function MenusPage() {
                     type="button"
                     onClick={() => setEditForm({
                       ...editForm,
-                      meats: [...editForm.meats, { name: '', nameEn: '', price: '0' }]
+                      meats: [...editForm.meats, { name: '', nameEn: '', price: '0', is_available: true }]
                     })}
                     className="text-sm px-3 py-1 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-lg"
                   >
@@ -1180,7 +1396,24 @@ export default function MenusPage() {
                 {editForm.meats.length > 0 ? (
                   <div className="space-y-2">
                     {editForm.meats.map((meat, idx) => (
-                      <div key={idx} className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg">
+                      <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg ${meat.is_available !== false ? 'bg-gray-50' : 'bg-red-50 border border-red-200'}`}>
+                        {/* Availability Toggle */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newMeats = [...editForm.meats];
+                            newMeats[idx].is_available = newMeats[idx].is_available === false ? true : false;
+                            setEditForm({ ...editForm, meats: newMeats });
+                          }}
+                          className="flex-shrink-0"
+                          title={meat.is_available !== false ? 'Click to mark as unavailable' : 'Click to mark as available'}
+                        >
+                          {meat.is_available !== false ? (
+                            <ToggleRight className="w-6 h-6 text-green-500" />
+                          ) : (
+                            <ToggleLeft className="w-6 h-6 text-red-400" />
+                          )}
+                        </button>
                         <input
                           type="text"
                           value={meat.name}
@@ -1191,7 +1424,7 @@ export default function MenusPage() {
                           }}
                           onBlur={(e) => handleMeatNameBlur(idx, e.target.value)}
                           placeholder="Name (e.g., หมู)"
-                          className="flex-1 px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white"
+                          className={`flex-1 px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white ${meat.is_available === false ? 'opacity-50' : ''}`}
                         />
                         <div className="flex-1 relative">
                           <input
@@ -1203,7 +1436,7 @@ export default function MenusPage() {
                               setEditForm({ ...editForm, meats: newMeats });
                             }}
                             placeholder={translatingMeatIdx === idx ? "Translating..." : "English (e.g., Pork)"}
-                            className={`w-full px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white ${translatingMeatIdx === idx ? 'bg-gray-100' : ''}`}
+                            className={`w-full px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white ${translatingMeatIdx === idx ? 'bg-gray-100' : ''} ${meat.is_available === false ? 'opacity-50' : ''}`}
                             disabled={translatingMeatIdx === idx}
                           />
                           {translatingMeatIdx === idx && (
@@ -1219,7 +1452,7 @@ export default function MenusPage() {
                             setEditForm({ ...editForm, meats: newMeats });
                           }}
                           placeholder="Price (0=free)"
-                          className="w-24 px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white"
+                          className={`w-24 px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white ${meat.is_available === false ? 'opacity-50' : ''}`}
                         />
                         <button
                           type="button"
@@ -1237,6 +1470,7 @@ export default function MenusPage() {
                 ) : (
                   <p className="text-sm text-gray-500">No meats added. Click "+ Add Meat" to add options.</p>
                 )}
+                <p className="text-xs text-gray-400 mt-2">Toggle switch to mark meat as unavailable (e.g., out of stock)</p>
               </div>
 
               {/* Add-ons Section */}
@@ -1249,7 +1483,7 @@ export default function MenusPage() {
                     type="button"
                     onClick={() => setEditForm({
                       ...editForm,
-                      addOns: [...editForm.addOns, { name: '', nameEn: '', price: '' }]
+                      addOns: [...editForm.addOns, { name: '', nameEn: '', price: '', is_available: true }]
                     })}
                     className="text-sm px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg"
                   >
@@ -1259,7 +1493,24 @@ export default function MenusPage() {
                 {editForm.addOns.length > 0 ? (
                   <div className="space-y-2">
                     {editForm.addOns.map((addon, idx) => (
-                      <div key={idx} className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg">
+                      <div key={idx} className={`flex items-center gap-2 p-2 rounded-lg ${addon.is_available !== false ? 'bg-gray-50' : 'bg-red-50 border border-red-200'}`}>
+                        {/* Availability Toggle */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newAddOns = [...editForm.addOns];
+                            newAddOns[idx].is_available = newAddOns[idx].is_available === false ? true : false;
+                            setEditForm({ ...editForm, addOns: newAddOns });
+                          }}
+                          className="flex-shrink-0"
+                          title={addon.is_available !== false ? 'Click to mark as unavailable' : 'Click to mark as available'}
+                        >
+                          {addon.is_available !== false ? (
+                            <ToggleRight className="w-6 h-6 text-green-500" />
+                          ) : (
+                            <ToggleLeft className="w-6 h-6 text-red-400" />
+                          )}
+                        </button>
                         <input
                           type="text"
                           value={addon.name}
@@ -1270,7 +1521,7 @@ export default function MenusPage() {
                           }}
                           onBlur={(e) => handleAddOnNameBlur(idx, e.target.value)}
                           placeholder="Name (e.g., ไข่ดาว)"
-                          className="flex-1 px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white"
+                          className={`flex-1 px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white ${addon.is_available === false ? 'opacity-50' : ''}`}
                         />
                         <div className="flex-1 relative">
                           <input
@@ -1282,7 +1533,7 @@ export default function MenusPage() {
                               setEditForm({ ...editForm, addOns: newAddOns });
                             }}
                             placeholder={translatingAddOnIdx === idx ? "Translating..." : "English (e.g., Fried Egg)"}
-                            className={`w-full px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white ${translatingAddOnIdx === idx ? 'bg-gray-100' : ''}`}
+                            className={`w-full px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white ${translatingAddOnIdx === idx ? 'bg-gray-100' : ''} ${addon.is_available === false ? 'opacity-50' : ''}`}
                             disabled={translatingAddOnIdx === idx}
                           />
                           {translatingAddOnIdx === idx && (
@@ -1298,7 +1549,7 @@ export default function MenusPage() {
                             setEditForm({ ...editForm, addOns: newAddOns });
                           }}
                           placeholder="Price"
-                          className="w-24 px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white"
+                          className={`w-24 px-3 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white ${addon.is_available === false ? 'opacity-50' : ''}`}
                         />
                         <button
                           type="button"
@@ -1316,6 +1567,7 @@ export default function MenusPage() {
                 ) : (
                   <p className="text-sm text-gray-500">No add-ons added. Click "+ Add Add-on" to add extras.</p>
                 )}
+                <p className="text-xs text-gray-400 mt-2">Toggle switch to mark add-on as unavailable (e.g., out of stock)</p>
               </div>
             </div>
 
@@ -1439,6 +1691,7 @@ export default function MenusPage() {
           allowCrossRestaurant={true}
           onSelectImage={(imageUrl) => {
             setEditForm({ ...editForm, photo_url: imageUrl });
+            setOriginalImageUrl(imageUrl); // Update original for logo application
             setEditImageFile(null);
             setShowEditImageGallery(false);
           }}

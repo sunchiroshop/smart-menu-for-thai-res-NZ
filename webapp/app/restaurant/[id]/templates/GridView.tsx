@@ -26,21 +26,98 @@ interface GridViewProps {
   selectedLanguage?: string;
 }
 
-// Translation for "View All" button
-const viewAllText: Record<string, string> = {
-  'original': 'ดูทั้งหมด',
-  'th': 'ดูทั้งหมด',
-  'en': 'View All',
-  'zh': '查看全部',
-  'ja': 'すべて見る',
-  'ko': '전체 보기',
-  'vi': 'Xem tất cả',
-  'hi': 'सभी देखें',
-  'es': 'Ver todo',
-  'fr': 'Voir tout',
-  'de': 'Alle anzeigen',
-  'id': 'Lihat Semua',
-  'ms': 'Lihat Semua',
+// Translations for UI elements
+const translations: Record<string, Record<string, string>> = {
+  viewAll: {
+    'original': 'ดูทั้งหมด',
+    'th': 'ดูทั้งหมด',
+    'en': 'View All',
+    'zh': '查看全部',
+    'ja': 'すべて見る',
+    'ko': '전체 보기',
+    'vi': 'Xem tất cả',
+    'hi': 'सभी देखें',
+    'es': 'Ver todo',
+    'fr': 'Voir tout',
+    'de': 'Alle anzeigen',
+    'id': 'Lihat Semua',
+    'ms': 'Lihat Semua',
+  },
+  collapse: {
+    'original': 'ย่อ',
+    'th': 'ย่อ',
+    'en': 'Collapse',
+    'zh': '收起',
+    'ja': '折りたたむ',
+    'ko': '접기',
+    'vi': 'Thu gọn',
+    'hi': 'छुपाएं',
+    'es': 'Colapsar',
+    'fr': 'Réduire',
+    'de': 'Einklappen',
+    'id': 'Tutup',
+    'ms': 'Tutup',
+  },
+  bestseller: {
+    'original': 'สินค้าขายดี',
+    'th': 'สินค้าขายดี',
+    'en': 'Bestseller',
+    'zh': '畅销品',
+    'ja': 'ベストセラー',
+    'ko': '베스트셀러',
+    'vi': 'Bán chạy nhất',
+    'hi': 'बेस्टसेलर',
+    'es': 'Más vendido',
+    'fr': 'Meilleures ventes',
+    'de': 'Bestseller',
+    'id': 'Terlaris',
+    'ms': 'Terlaris',
+  },
+  popularDishes: {
+    'original': 'เมนูยอดนิยม',
+    'th': 'เมนูยอดนิยม',
+    'en': 'Popular dishes',
+    'zh': '热门菜品',
+    'ja': '人気料理',
+    'ko': '인기 메뉴',
+    'vi': 'Món phổ biến',
+    'hi': 'लोकप्रिय व्यंजन',
+    'es': 'Platos populares',
+    'fr': 'Plats populaires',
+    'de': 'Beliebte Gerichte',
+    'id': 'Hidangan Populer',
+    'ms': 'Hidangan Popular',
+  },
+  bestSellerBadge: {
+    'original': 'ขายดี',
+    'th': 'ขายดี',
+    'en': 'BEST SELLER',
+    'zh': '热卖',
+    'ja': '人気',
+    'ko': '인기',
+    'vi': 'BÁN CHẠY',
+    'hi': 'बेस्ट सेलर',
+    'es': 'MÁS VENDIDO',
+    'fr': 'BEST SELLER',
+    'de': 'BESTSELLER',
+    'id': 'TERLARIS',
+    'ms': 'TERLARIS',
+  },
+  add: {
+    'original': 'เพิ่ม',
+    'th': 'เพิ่ม',
+    'en': 'Add',
+    'zh': '添加',
+    'ja': '追加',
+    'ko': '추가',
+    'vi': 'Thêm',
+    'hi': 'जोड़ें',
+    'es': 'Añadir',
+    'fr': 'Ajouter',
+    'de': 'Hinzufügen',
+    'id': 'Tambah',
+    'ms': 'Tambah',
+  },
 };
 
 export default function GridView({ menus, groupedMenus, themeColor, onItemClick, selectedLanguage = 'original' }: GridViewProps) {
@@ -69,7 +146,7 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
     }
   };
 
-  const getViewAllText = () => viewAllText[selectedLanguage] || viewAllText['en'];
+  const t = (key: keyof typeof translations) => translations[key][selectedLanguage] || translations[key]['en'];
 
   return (
     <div className="space-y-12">
@@ -86,8 +163,8 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
             >
               <h2 className={`text-3xl font-bold flex items-center gap-3 ${isBestsellerCategory(category) ? 'text-orange-600' : 'text-gray-900'}`}>
                 {isBestsellerCategory(category) && <Flame className="w-8 h-8 text-orange-500 fill-orange-500" />}
-                {isBestsellerCategory(category) ? 'Bestseller' : category}
-                {isBestsellerCategory(category) && <span className="text-lg font-normal text-orange-500">Popular dishes</span>}
+                {isBestsellerCategory(category) ? t('bestseller') : category}
+                {isBestsellerCategory(category) && <span className="text-lg font-normal text-orange-500">{t('popularDishes')}</span>}
                 <span className="text-lg font-normal text-gray-500">({items.length})</span>
               </h2>
 
@@ -101,7 +178,7 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
                     color: isExpanded ? themeColor : 'white'
                   }}
                 >
-                  {isExpanded ? (selectedLanguage === 'th' || selectedLanguage === 'original' ? 'ย่อ' : 'Collapse') : getViewAllText()}
+                  {isExpanded ? t('collapse') : t('viewAll')}
                 </button>
               )}
             </div>
@@ -151,7 +228,7 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
                           <div className="absolute top-3 right-3">
                             <span className="inline-flex items-center px-3 py-1 bg-orange-500 text-white rounded-full text-xs font-bold shadow-lg">
                               <Star className="w-3 h-3 mr-1 fill-current" />
-                              BEST SELLER
+                              {t('bestSellerBadge')}
                             </span>
                           </div>
                         )}
@@ -160,11 +237,11 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
                       {/* Content */}
                       <div className="p-5">
                         <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-1">
-                          {menu.name}
+                          {selectedLanguage === 'en' && menu.nameEn ? menu.nameEn : menu.name}
                         </h3>
                         {menu.description && (
                           <p className="text-sm text-gray-600 mb-3 line-clamp-2">
-                            {menu.description}
+                            {selectedLanguage === 'en' && menu.descriptionEn ? menu.descriptionEn : menu.description}
                           </p>
                         )}
                         <div className="flex items-center justify-between">
@@ -180,7 +257,7 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
                             style={{ backgroundColor: themeColor }}
                           >
                             <Plus className="w-4 h-4" />
-                            Add
+                            {t('add')}
                           </button>
                         </div>
                       </div>
@@ -227,7 +304,7 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
                         <div className="absolute top-3 right-3">
                           <span className="inline-flex items-center px-3 py-1 bg-orange-500 text-white rounded-full text-xs font-bold shadow-lg">
                             <Star className="w-3 h-3 mr-1 fill-current" />
-                            BEST SELLER
+                            {t('bestSellerBadge')}
                           </span>
                         </div>
                       )}
@@ -237,7 +314,7 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
                     <div className="p-6">
                       <div className="mb-2">
                         <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                          {menu.name}
+                          {selectedLanguage === 'en' && menu.nameEn ? menu.nameEn : menu.name}
                           {menu.is_best_seller && !menu.photo_url && (
                             <Star className="w-4 h-4 fill-orange-500 text-orange-500" />
                           )}
@@ -245,7 +322,7 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
                       </div>
                       {menu.description && (
                         <p className="text-sm text-gray-600 mb-4 line-clamp-2">
-                          {menu.description}
+                          {selectedLanguage === 'en' && menu.descriptionEn ? menu.descriptionEn : menu.description}
                         </p>
                       )}
                       <div className="flex items-center justify-between">
@@ -261,7 +338,7 @@ export default function GridView({ menus, groupedMenus, themeColor, onItemClick,
                           style={{ backgroundColor: themeColor }}
                         >
                           <Plus className="w-4 h-4" />
-                          Add
+                          {t('add')}
                         </button>
                       </div>
                     </div>

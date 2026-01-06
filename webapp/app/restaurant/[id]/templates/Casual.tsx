@@ -20,10 +20,31 @@ interface CasualProps {
   groupedMenus: Record<string, MenuItem[]>;
   themeColor: string;
   onItemClick: (item: MenuItem) => void;
+  selectedLanguage?: string;
 }
 
-export default function Casual({ menus, groupedMenus, themeColor, onItemClick }: CasualProps) {
+// Translations for UI elements
+const translations: Record<string, Record<string, string>> = {
+  bestseller: {
+    'original': 'สินค้าขายดี', 'th': 'สินค้าขายดี', 'en': 'Bestseller', 'zh': '畅销品',
+    'ja': 'ベストセラー', 'ko': '베스트셀러', 'vi': 'Bán chạy nhất', 'hi': 'बेस्टसेलर',
+    'es': 'Más vendido', 'fr': 'Meilleures ventes', 'de': 'Bestseller', 'id': 'Terlaris', 'ms': 'Terlaris',
+  },
+  popularDishes: {
+    'original': 'เมนูยอดนิยม', 'th': 'เมนูยอดนิยม', 'en': 'Popular dishes', 'zh': '热门菜品',
+    'ja': '人気料理', 'ko': '인기 메뉴', 'vi': 'Món phổ biến', 'hi': 'लोकप्रिय व्यंजन',
+    'es': 'Platos populares', 'fr': 'Plats populaires', 'de': 'Beliebte Gerichte', 'id': 'Hidangan Populer', 'ms': 'Hidangan Popular',
+  },
+  add: {
+    'original': 'เพิ่ม', 'th': 'เพิ่ม', 'en': 'Add', 'zh': '添加',
+    'ja': '追加', 'ko': '추가', 'vi': 'Thêm', 'hi': 'जोड़ें',
+    'es': 'Añadir', 'fr': 'Ajouter', 'de': 'Hinzufügen', 'id': 'Tambah', 'ms': 'Tambah',
+  },
+};
+
+export default function Casual({ menus, groupedMenus, themeColor, onItemClick, selectedLanguage = 'original' }: CasualProps) {
   const isBestsellerCategory = (category: string) => category.toLowerCase() === 'bestseller';
+  const t = (key: keyof typeof translations) => translations[key][selectedLanguage] || translations[key]['en'];
 
   const categoryColors = [
     'from-orange-100 to-red-100',
@@ -42,8 +63,8 @@ export default function Casual({ menus, groupedMenus, themeColor, onItemClick }:
             <div className="bg-gradient-to-r from-orange-200 to-red-200 rounded-2xl p-6 mb-6 shadow-lg border-2 border-orange-400">
               <h2 className="text-3xl font-bold text-orange-700 text-center flex items-center justify-center gap-3">
                 <Flame className="w-8 h-8 text-orange-600 fill-orange-600" />
-                Bestseller
-                <span className="text-lg font-normal text-orange-600">Popular dishes</span>
+                {t('bestseller')}
+                <span className="text-lg font-normal text-orange-600">{t('popularDishes')}</span>
               </h2>
             </div>
           ) : (
@@ -107,7 +128,7 @@ export default function Casual({ menus, groupedMenus, themeColor, onItemClick }:
                 <div className="p-5">
                   {/* Name */}
                   <h3 className="text-xl font-bold text-gray-900 mb-1 flex items-center gap-2">
-                    {menu.name}
+                    {selectedLanguage === 'en' && menu.nameEn ? menu.nameEn : menu.name}
                     {menu.is_best_seller && (
                       <Heart className="w-4 h-4 fill-red-500 text-red-500 animate-pulse" />
                     )}
@@ -116,10 +137,10 @@ export default function Casual({ menus, groupedMenus, themeColor, onItemClick }:
                   {/* Description */}
                   {menu.description && (
                     <p className="text-sm text-gray-600 mb-3 line-clamp-2">
-                      {menu.description}
+                      {selectedLanguage === 'en' && menu.descriptionEn ? menu.descriptionEn : menu.description}
                     </p>
                   )}
-                  
+
                   {/* Price & Button */}
                   <div className="flex items-center justify-between">
                     <span className="text-2xl font-black" style={{ color: themeColor }}>
@@ -134,7 +155,7 @@ export default function Casual({ menus, groupedMenus, themeColor, onItemClick }:
                       style={{ backgroundColor: themeColor }}
                     >
                       <Plus className="w-4 h-4" />
-                      Add
+                      {t('add')}
                     </button>
                   </div>
                 </div>

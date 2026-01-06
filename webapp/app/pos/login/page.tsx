@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChefHat, Users, Lock, Store, Loader2, Globe } from 'lucide-react';
-import { t, mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
+import { t, tBilingual, mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
+import BilingualText, { BilingualTextInline } from '@/components/BilingualText';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -114,7 +115,7 @@ export default function POSLoginPage() {
           restaurantId: selectedRestaurant?.id,
           restaurantName: selectedRestaurant?.name,
           restaurantSlug: selectedRestaurant?.slug,
-          primaryLanguage: selectedRestaurant?.primaryLanguage || 'th',
+          primaryLanguage: selectedRestaurant?.primaryLanguage || 'en',
           expires: Date.now() + (8 * 60 * 60 * 1000) // 8 hours
         };
         localStorage.setItem('pos_session', JSON.stringify(session));
@@ -159,11 +160,29 @@ export default function POSLoginPage() {
         {/* Language Selector - Top Right */}
         <div className="flex justify-end mb-4">
           <button
-            onClick={() => setLang(lang === 'en' ? 'th' : 'en')}
+            onClick={() => {
+              const langOrder: POSLanguage[] = ['en', 'th', 'zh', 'ja', 'ko', 'vi', 'hi', 'es', 'fr', 'de', 'id', 'ms'];
+              const currentIndex = langOrder.indexOf(lang);
+              const nextIndex = (currentIndex + 1) % langOrder.length;
+              setLang(langOrder[nextIndex]);
+            }}
             className="flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 text-sm transition-colors"
           >
             <Globe className="w-4 h-4" />
-            <span>{lang === 'en' ? '🇬🇧 EN' : '🇹🇭 TH'}</span>
+            <span>
+              {lang === 'en' ? '🇬🇧 EN' :
+               lang === 'th' ? '🇹🇭 TH' :
+               lang === 'zh' ? '🇨🇳 中文' :
+               lang === 'ja' ? '🇯🇵 日本語' :
+               lang === 'ko' ? '🇰🇷 한국어' :
+               lang === 'vi' ? '🇻🇳 VN' :
+               lang === 'hi' ? '🇮🇳 हिंदी' :
+               lang === 'es' ? '🇪🇸 ES' :
+               lang === 'fr' ? '🇫🇷 FR' :
+               lang === 'de' ? '🇩🇪 DE' :
+               lang === 'id' ? '🇮🇩 ID' :
+               '🇲🇾 MY'}
+            </span>
           </button>
         </div>
 
@@ -176,10 +195,22 @@ export default function POSLoginPage() {
               <Users className="w-10 h-10 text-white" />
             )}
           </div>
-          <h1 className="text-2xl font-bold text-white">{t('login', 'title', lang)}</h1>
-          <p className="text-slate-400 mt-2">
-            {loginType === 'kitchen' ? t('login', 'kitchenSystem', lang) : t('login', 'staffSystem', lang)}
-          </p>
+          <BilingualText
+            category="login"
+            textKey="title"
+            lang={lang}
+            className="justify-center mb-2"
+            primaryClassName="text-2xl font-bold text-white"
+            englishClassName="text-sm text-slate-400"
+          />
+          <BilingualText
+            category="login"
+            textKey={loginType === 'kitchen' ? 'kitchenSystem' : 'staffSystem'}
+            lang={lang}
+            className="justify-center"
+            primaryClassName="text-slate-300"
+            englishClassName="text-xs text-slate-500"
+          />
         </div>
 
         {/* Login Type Toggle */}
@@ -193,7 +224,12 @@ export default function POSLoginPage() {
             }`}
           >
             <Users className="w-5 h-5" />
-            {t('login', 'staffMode', lang)}
+            <BilingualTextInline
+              category="login"
+              textKey="staffMode"
+              lang={lang}
+              englishClassName={`text-[10px] ${loginType === 'staff' ? 'opacity-80' : 'opacity-60'} ml-1`}
+            />
           </button>
           <button
             onClick={() => setLoginType('kitchen')}
@@ -204,7 +240,12 @@ export default function POSLoginPage() {
             }`}
           >
             <ChefHat className="w-5 h-5" />
-            {t('login', 'kitchenMode', lang)}
+            <BilingualTextInline
+              category="login"
+              textKey="kitchenMode"
+              lang={lang}
+              englishClassName={`text-[10px] ${loginType === 'kitchen' ? 'opacity-80' : 'opacity-60'} ml-1`}
+            />
           </button>
         </div>
 
@@ -213,14 +254,25 @@ export default function POSLoginPage() {
           <div className="bg-slate-800 rounded-2xl p-6 shadow-xl">
             <div className="flex items-center gap-3 mb-6">
               <Store className="w-6 h-6 text-orange-500" />
-              <h2 className="text-lg font-semibold text-white">{t('login', 'selectRestaurant', lang)}</h2>
+              <BilingualText
+                category="login"
+                textKey="selectRestaurant"
+                lang={lang}
+                primaryClassName="text-lg font-semibold text-white"
+                englishClassName="text-xs text-slate-400"
+              />
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">
-                  {t('login', 'restaurantCode', lang)}
-                </label>
+                <BilingualText
+                  category="login"
+                  textKey="restaurantCode"
+                  lang={lang}
+                  className="mb-2"
+                  primaryClassName="text-sm font-medium text-slate-300"
+                  englishClassName="text-xs text-slate-500"
+                />
                 <input
                   type="text"
                   value={restaurantCode}
@@ -246,7 +298,12 @@ export default function POSLoginPage() {
                 {loading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
-                  <>{t('login', 'next', lang)}</>
+                  <BilingualTextInline
+                    category="login"
+                    textKey="next"
+                    lang={lang}
+                    englishClassName="text-[10px] opacity-80 ml-1"
+                  />
                 )}
               </button>
             </div>
@@ -258,7 +315,14 @@ export default function POSLoginPage() {
           <div className="bg-slate-800 rounded-2xl p-6 shadow-xl">
             {/* Restaurant Info */}
             <div className="text-center mb-6">
-              <p className="text-slate-400 text-sm">{t('login', 'restaurant', lang)}</p>
+              <BilingualText
+                category="login"
+                textKey="restaurant"
+                lang={lang}
+                className="justify-center"
+                primaryClassName="text-sm text-slate-300"
+                englishClassName="text-xs text-slate-500"
+              />
               <p className="text-white font-semibold text-lg">{selectedRestaurant?.name}</p>
               <button
                 onClick={() => {
@@ -268,13 +332,24 @@ export default function POSLoginPage() {
                 }}
                 className="text-orange-500 text-sm mt-1 hover:underline"
               >
-                {t('login', 'changeRestaurant', lang)}
+                <BilingualTextInline
+                  category="login"
+                  textKey="changeRestaurant"
+                  lang={lang}
+                  englishClassName="text-[10px] opacity-70 ml-1"
+                />
               </button>
             </div>
 
             <div className="flex items-center gap-3 mb-6">
               <Lock className="w-6 h-6 text-orange-500" />
-              <h2 className="text-lg font-semibold text-white">{t('login', 'pinCode', lang)}</h2>
+              <BilingualText
+                category="login"
+                textKey="pinCode"
+                lang={lang}
+                primaryClassName="text-lg font-semibold text-white"
+                englishClassName="text-xs text-slate-400"
+              />
             </div>
 
             {/* PIN Display */}
@@ -336,11 +411,21 @@ export default function POSLoginPage() {
               {loading ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  {t('login', 'loggingIn', lang)}
+                  <BilingualTextInline
+                    category="login"
+                    textKey="loggingIn"
+                    lang={lang}
+                    englishClassName="text-sm opacity-80 ml-1"
+                  />
                 </>
               ) : (
                 <>
-                  ✓ {t('login', 'enter', lang)}
+                  ✓ <BilingualTextInline
+                    category="login"
+                    textKey="enter"
+                    lang={lang}
+                    englishClassName="text-sm opacity-80 ml-1"
+                  />
                 </>
               )}
             </button>

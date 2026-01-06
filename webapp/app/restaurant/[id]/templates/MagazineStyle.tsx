@@ -20,10 +20,41 @@ interface MagazineStyleProps {
   groupedMenus: Record<string, MenuItem[]>;
   themeColor: string;
   onItemClick: (item: MenuItem) => void;
+  selectedLanguage?: string;
 }
 
-export default function MagazineStyle({ menus, groupedMenus, themeColor, onItemClick }: MagazineStyleProps) {
+// Translations for UI elements
+const translations: Record<string, Record<string, string>> = {
+  bestseller: {
+    'original': 'สินค้าขายดี', 'th': 'สินค้าขายดี', 'en': 'Bestseller', 'zh': '畅销品',
+    'ja': 'ベストセラー', 'ko': '베스트셀러', 'vi': 'Bán chạy nhất', 'hi': 'बेस्टसेलर',
+    'es': 'Más vendido', 'fr': 'Meilleures ventes', 'de': 'Bestseller', 'id': 'Terlaris', 'ms': 'Terlaris',
+  },
+  popularDishes: {
+    'original': 'เมนูยอดนิยม', 'th': 'เมนูยอดนิยม', 'en': 'Popular dishes', 'zh': '热门菜品',
+    'ja': '人気料理', 'ko': '인기 메뉴', 'vi': 'Món phổ biến', 'hi': 'लोकप्रिय व्यंजन',
+    'es': 'Platos populares', 'fr': 'Plats populaires', 'de': 'Beliebte Gerichte', 'id': 'Hidangan Populer', 'ms': 'Hidangan Popular',
+  },
+  bestSellerBadge: {
+    'original': 'ขายดี', 'th': 'ขายดี', 'en': 'BEST SELLER', 'zh': '热卖',
+    'ja': '人気', 'ko': '인기', 'vi': 'BÁN CHẠY', 'hi': 'बेस्ट सेलर',
+    'es': 'MÁS VENDIDO', 'fr': 'BEST SELLER', 'de': 'BESTSELLER', 'id': 'TERLARIS', 'ms': 'TERLARIS',
+  },
+  bestSellersThisWeek: {
+    'original': 'เมนูขายดีประจำสัปดาห์', 'th': 'เมนูขายดีประจำสัปดาห์', 'en': 'Best Sellers This Week', 'zh': '本周畅销',
+    'ja': '今週のベストセラー', 'ko': '이번 주 베스트셀러', 'vi': 'Bán chạy tuần này', 'hi': 'इस सप्ताह के बेस्ट सेलर',
+    'es': 'Más vendidos esta semana', 'fr': 'Meilleures ventes cette semaine', 'de': 'Bestseller dieser Woche', 'id': 'Terlaris Minggu Ini', 'ms': 'Terlaris Minggu Ini',
+  },
+  addToCart: {
+    'original': 'เพิ่มลงตะกร้า', 'th': 'เพิ่มลงตะกร้า', 'en': 'Add to Cart', 'zh': '加入购物车',
+    'ja': 'カートに追加', 'ko': '장바구니에 추가', 'vi': 'Thêm vào giỏ', 'hi': 'कार्ट में जोड़ें',
+    'es': 'Añadir al carrito', 'fr': 'Ajouter au panier', 'de': 'In den Warenkorb', 'id': 'Tambah ke Keranjang', 'ms': 'Tambah ke Troli',
+  },
+};
+
+export default function MagazineStyle({ menus, groupedMenus, themeColor, onItemClick, selectedLanguage = 'original' }: MagazineStyleProps) {
   const isBestsellerCategory = (category: string) => category.toLowerCase() === 'bestseller';
+  const t = (key: keyof typeof translations) => translations[key][selectedLanguage] || translations[key]['en'];
 
   return (
     <div className="space-y-12">
@@ -43,8 +74,8 @@ export default function MagazineStyle({ menus, groupedMenus, themeColor, onItemC
             >
               <h2 className={`text-3xl font-bold flex items-center gap-3 ${isBestseller ? 'text-orange-600' : 'text-gray-900'}`}>
                 {isBestseller && <Flame className="w-8 h-8 text-orange-500 fill-orange-500" />}
-                {isBestseller ? 'Bestseller' : category}
-                {isBestseller && <span className="text-lg font-normal text-orange-500">Popular dishes</span>}
+                {isBestseller ? t('bestseller') : category}
+                {isBestseller && <span className="text-lg font-normal text-orange-500">{t('popularDishes')}</span>}
               </h2>
             </div>
             
@@ -55,7 +86,7 @@ export default function MagazineStyle({ menus, groupedMenus, themeColor, onItemC
                 {!isBestseller && (
                   <div className="flex items-center gap-2 mb-4">
                     <Star className="w-5 h-5 fill-orange-500 text-orange-500" />
-                    <h3 className="text-xl font-bold text-orange-600">Best Sellers This Week</h3>
+                    <h3 className="text-xl font-bold text-orange-600">{t('bestSellersThisWeek')}</h3>
                   </div>
                 )}
 
@@ -78,7 +109,7 @@ export default function MagazineStyle({ menus, groupedMenus, themeColor, onItemC
                           <div className="absolute top-4 left-4">
                             <span className="inline-flex items-center px-4 py-2 bg-orange-500 text-white rounded-full text-sm font-bold shadow-xl">
                               <Star className="w-4 h-4 mr-1 fill-current" />
-                              BEST SELLER
+                              {t('bestSellerBadge')}
                             </span>
                           </div>
                         </div>
@@ -87,15 +118,15 @@ export default function MagazineStyle({ menus, groupedMenus, themeColor, onItemC
                       {/* Content */}
                       <div className="p-6">
                         <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                          {menu.name}
+                          {selectedLanguage === 'en' && menu.nameEn ? menu.nameEn : menu.name}
                         </h3>
 
                         {menu.description && (
                           <p className="text-gray-700 mb-4 leading-relaxed">
-                            {menu.description}
+                            {selectedLanguage === 'en' && menu.descriptionEn ? menu.descriptionEn : menu.description}
                           </p>
                         )}
-                        
+
                         {/* Price & Button */}
                         <div className="flex items-center justify-between">
                           <span className="text-3xl font-bold" style={{ color: themeColor }}>
@@ -111,7 +142,7 @@ export default function MagazineStyle({ menus, groupedMenus, themeColor, onItemC
                             style={{ backgroundColor: themeColor }}
                           >
                             <Plus className="w-5 h-5" />
-                            Add to Cart
+                            {t('addToCart')}
                           </button>
                         </div>
                       </div>
@@ -144,7 +175,7 @@ export default function MagazineStyle({ menus, groupedMenus, themeColor, onItemC
                     {/* Content */}
                     <div className="p-3">
                       <h3 className="text-sm font-bold text-gray-900 mb-1 line-clamp-1">
-                        {menu.name}
+                        {selectedLanguage === 'en' && menu.nameEn ? menu.nameEn : menu.name}
                       </h3>
                       <div className="flex items-center justify-between">
                         <span className="text-lg font-bold" style={{ color: themeColor }}>

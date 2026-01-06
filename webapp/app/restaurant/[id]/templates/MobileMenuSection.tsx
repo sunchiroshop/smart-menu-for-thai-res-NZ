@@ -18,6 +18,25 @@ interface MenuItem {
   addOns?: Array<{name: string; nameEn?: string; price: string}>;
 }
 
+// Translations for UI elements
+const translations: Record<string, Record<string, string>> = {
+  viewAll: {
+    'original': 'ดูทั้งหมด', 'th': 'ดูทั้งหมด', 'en': 'View All', 'zh': '查看全部',
+    'ja': 'すべて見る', 'ko': '전체 보기', 'vi': 'Xem tất cả', 'hi': 'सभी देखें',
+    'es': 'Ver todo', 'fr': 'Voir tout', 'de': 'Alle anzeigen', 'id': 'Lihat Semua', 'ms': 'Lihat Semua',
+  },
+  bestSellerBadge: {
+    'original': 'ขายดี', 'th': 'ขายดี', 'en': 'Bestseller', 'zh': '热卖',
+    'ja': '人気', 'ko': '인기', 'vi': 'Bán chạy', 'hi': 'बेस्ट सेलर',
+    'es': 'Más vendido', 'fr': 'Best-seller', 'de': 'Bestseller', 'id': 'Terlaris', 'ms': 'Terlaris',
+  },
+  items: {
+    'original': 'รายการ', 'th': 'รายการ', 'en': 'items', 'zh': '项目',
+    'ja': '件', 'ko': '개', 'vi': 'món', 'hi': 'आइटम',
+    'es': 'artículos', 'fr': 'articles', 'de': 'Artikel', 'id': 'item', 'ms': 'item',
+  },
+};
+
 interface MobileMenuSectionProps {
   categories: string[];
   groupedMenus: Record<string, MenuItem[]>;
@@ -35,6 +54,9 @@ export default function MobileMenuSection({
   selectedLanguage = 'original',
   itemsPerCategory = 2
 }: MobileMenuSectionProps) {
+  // Translation helper
+  const t = (key: keyof typeof translations) => translations[key][selectedLanguage] || translations[key]['en'];
+
   // State for category detail modal
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -97,7 +119,7 @@ export default function MobileMenuSection({
                     className="text-sm font-medium px-3 py-1 rounded-full transition-colors"
                     style={{ color: themeColor, backgroundColor: `${themeColor}15` }}
                   >
-                    ดูทั้งหมด
+                    {t('viewAll')}
                   </button>
                 )}
               </div>
@@ -155,7 +177,7 @@ export default function MobileMenuSection({
                         {item.is_best_seller && (
                           <div className="absolute top-2 left-2 bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
                             <Star className="w-3 h-3 fill-white" />
-                            <span>ขายดี</span>
+                            <span>{t('bestSellerBadge')}</span>
                           </div>
                         )}
                       </div>
@@ -233,7 +255,7 @@ export default function MobileMenuSection({
               {/* View Mode Toggle */}
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-500">
-                  {groupedMenus[selectedCategory]?.length || 0} รายการ
+                  {groupedMenus[selectedCategory]?.length || 0} {t('items')}
                 </span>
                 <div className="flex-1" />
                 <div className="flex bg-gray-100 rounded-lg p-1">

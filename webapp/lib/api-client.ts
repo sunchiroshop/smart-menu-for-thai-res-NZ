@@ -127,6 +127,7 @@ export interface GenerateImageRequest {
     enabled: boolean;
     logo_url: string;
     position: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
+    size?: 'small' | 'medium' | 'large'; // Logo size: small=12%, medium=18%, large=25%
   };
 }
 
@@ -220,6 +221,7 @@ export async function enhanceImage(
     enabled: boolean;
     logo_url: string;
     position: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
+    size?: 'small' | 'medium' | 'large'; // Logo size: small=12%, medium=18%, large=25%
   },
   userId?: string // Required for tracking usage limits
 ): Promise<EnhanceImageResponse> {
@@ -297,7 +299,8 @@ export interface ApplyLogoResponse {
 export async function applyLogoOnly(
   imageFile: File,
   logoUrl: string,
-  position: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right' = 'top-right'
+  position: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right' = 'top-right',
+  logoSize: 'small' | 'medium' | 'large' = 'medium' // Logo size: small=12%, medium=18%, large=25%
 ): Promise<ApplyLogoResponse> {
   try {
     console.log('🎨 Applying logo only (no AI enhancement)...');
@@ -309,6 +312,7 @@ export async function applyLogoOnly(
     formData.append('file', imageFile);
     formData.append('logo_url', logoUrl);
     formData.append('position', position);
+    formData.append('logo_size', logoSize);
 
     const response = await fetch(`${API_BASE_URL}/api/image/apply-logo`, {
       method: 'POST',

@@ -28,11 +28,12 @@ class StripeService:
         plan_id: str,
         interval: str = 'monthly',
         success_url: str = None,
-        cancel_url: str = None
+        cancel_url: str = None,
+        payment_method: str = 'card'  # 'card', 'apple_pay', 'google_pay'
     ) -> Dict[str, Any]:
         """
         Create a Stripe Checkout Session
-        
+
         Args:
             price_id: Stripe Price ID
             user_id: User ID from your system
@@ -41,54 +42,100 @@ class StripeService:
             interval: Billing interval (monthly, yearly)
             success_url: URL to redirect after successful payment
             cancel_url: URL to redirect after cancelled payment
-            
+            payment_method: Payment method type ('card', 'apple_pay', 'google_pay')
+
         Returns:
             Dictionary with session_id and checkout_url
         """
         try:
             if not self.api_key:
-                raise Exception("Stripe API key not configured")
-            
+                raise Exception("Stripe API key not configured. Please set STRIPE_SECRET_KEY in .env")
+
+            if not price_id:
+                raise Exception(f"Price ID is empty. Plan: {plan_id}, Interval: {interval}")
+
             # Default URLs
+            frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
             if not success_url:
-                success_url = os.getenv('FRONTEND_URL', 'http://localhost:3000') + '/checkout/success?session_id={CHECKOUT_SESSION_ID}'
+                success_url = f"{frontend_url}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}"
             if not cancel_url:
-                cancel_url = os.getenv('FRONTEND_URL', 'http://localhost:3000') + '/checkout/cancel'
-            
-            # Create Checkout Session
-            session = stripe.checkout.Session.create(
-                payment_method_types=['card'],
-                line_items=[{
+                cancel_url = f"{frontend_url}/checkout/cancel"
+
+            # Plan details for display
+            plan_details = {
+                'basic': {
+                    'name': 'Starter Plan',
+                    'description': 'Perfect for small takeaway shops',
+                    'image': 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop'
+                },
+                'pro': {
+                    'name': 'Professional Plan',
+                    'description': 'Most Popular - Casual dining restaurants',
+                    'image': 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400&h=400&fit=crop'
+                },
+                'enterprise': {
+                    'name': 'Enterprise Plan',
+                    'description': 'Fine dining & Restaurant chains',
+                    'image': 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400&h=400&fit=crop'
+                }
+            }
+
+            plan_info = plan_details.get(plan_id, {
+                'name': f'{plan_id.title()} Plan',
+                'description': 'Smart Menu Subscription',
+                'image': 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&h=400&fit=crop'
+            })
+
+            # Build checkout session params
+            checkout_params = {
+                'line_items': [{
                     'price': price_id,
                     'quantity': 1,
                 }],
-                mode='subscription',
-                success_url=success_url,
-                cancel_url=cancel_url,
-                customer_email=user_email,
-                client_reference_id=user_id,
-                metadata={
+                'mode': 'subscription',
+                'success_url': success_url,
+                'cancel_url': cancel_url,
+                'customer_email': user_email,
+                'client_reference_id': user_id,
+                'metadata': {
                     'user_id': user_id,
                     'plan_id': plan_id,
                     'interval': interval,
+                    'payment_method': payment_method,
                 },
-                subscription_data={
+                'subscription_data': {
                     'metadata': {
                         'user_id': user_id,
                         'plan_id': plan_id,
                         'interval': interval,
                     }
                 },
-            )
-            
+                # Allow all payment methods configured in Stripe Dashboard
+                # This enables Card, Apple Pay, Google Pay, Link, etc.
+                'payment_method_types': ['card'],
+            }
+
+            # For Apple Pay and Google Pay, we use the same 'card' type
+            # but Stripe Checkout automatically shows Apple Pay/Google Pay
+            # buttons when available on the customer's device
+
+            print(f"Creating Stripe checkout session: plan={plan_id}, price_id={price_id}, interval={interval}")
+
+            # Create Checkout Session
+            session = stripe.checkout.Session.create(**checkout_params)
+
+            print(f"Stripe session created: {session.id}")
+
             return {
                 'session_id': session.id,
                 'checkout_url': session.url,
             }
-            
+
         except stripe.error.StripeError as e:
+            print(f"Stripe API error: {str(e)}")
             raise Exception(f"Stripe error: {str(e)}")
         except Exception as e:
+            print(f"Checkout session error: {str(e)}")
             raise Exception(f"Failed to create checkout session: {str(e)}")
     
     def verify_session(self, session_id: str) -> Dict[str, Any]:

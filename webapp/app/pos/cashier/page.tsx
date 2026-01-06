@@ -10,8 +10,9 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import POSNavbar from '@/components/POSNavbar';
-import { mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
+import { t, tBilingual, mapToPOSLanguage, POSLanguage } from '@/lib/pos-translations';
 import { getThemeClasses, POSTheme } from '@/lib/pos-theme';
+import BilingualText, { BilingualTextInline } from '@/components/BilingualText';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -92,15 +93,60 @@ export default function CashierDashboardPage() {
   // Language state
   const [lang, setLang] = useState<POSLanguage>('th');
 
-  // Theme state
-  const [posTheme, setPosTheme] = useState<POSTheme>('orange');
+  // Theme state - load from localStorage first for instant display
+  const [posTheme, setPosTheme] = useState<POSTheme>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pos_theme');
+      if (saved) return saved as POSTheme;
+    }
+    return 'orange';
+  });
   const themeClasses = getThemeClasses(posTheme);
+
+  // Restaurant business info for receipts
+  const [restaurantInfo, setRestaurantInfo] = useState<{
+    address?: string;
+    phone?: string;
+    gst_number?: string;
+    ird_number?: string;
+  }>({});
 
   // Update clock
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Fetch restaurant settings (primary language, theme, and business info)
+  const fetchRestaurantSettings = useCallback(async () => {
+    if (!session?.restaurantId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('restaurants')
+        .select('primary_language, pos_theme_color, address, phone, gst_number, ird_number')
+        .eq('id', session.restaurantId)
+        .single();
+
+      if (data?.primary_language) {
+        const posLang = mapToPOSLanguage(data.primary_language);
+        setLang(posLang);
+      }
+      if (data?.pos_theme_color) {
+        setPosTheme(data.pos_theme_color as POSTheme);
+        localStorage.setItem('pos_theme', data.pos_theme_color);
+      }
+      // Set business info for receipts
+      setRestaurantInfo({
+        address: data?.address || undefined,
+        phone: data?.phone || undefined,
+        gst_number: data?.gst_number || undefined,
+        ird_number: data?.ird_number || undefined,
+      });
+    } catch (error) {
+      console.error('Failed to fetch restaurant settings:', error);
+    }
+  }, [session?.restaurantId]);
 
   // Check session on mount
   useEffect(() => {
@@ -167,7 +213,9 @@ export default function CashierDashboardPage() {
             setLang(mapToPOSLanguage(newLang));
           }
           if (payload.new && (payload.new as any).pos_theme_color) {
-            setPosTheme((payload.new as any).pos_theme_color as POSTheme);
+            const newTheme = (payload.new as any).pos_theme_color as POSTheme;
+            setPosTheme(newTheme);
+            localStorage.setItem('pos_theme', newTheme);
           }
         }
       )
@@ -202,29 +250,6 @@ export default function CashierDashboardPage() {
       setRefreshing(false);
     }
   };
-
-  // Fetch restaurant settings (primary language and theme)
-  const fetchRestaurantSettings = useCallback(async () => {
-    if (!session?.restaurantId) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('restaurants')
-        .select('primary_language, pos_theme_color')
-        .eq('id', session.restaurantId)
-        .single();
-
-      if (data?.primary_language) {
-        const posLang = mapToPOSLanguage(data.primary_language);
-        setLang(posLang);
-      }
-      if (data?.pos_theme_color) {
-        setPosTheme(data.pos_theme_color as POSTheme);
-      }
-    } catch (error) {
-      console.error('Failed to fetch restaurant settings:', error);
-    }
-  }, [session?.restaurantId]);
 
   const handleLogout = () => {
     localStorage.removeItem('pos_session');
@@ -271,23 +296,13 @@ export default function CashierDashboardPage() {
     }
   };
 
-  const getViewTitle = (type: ViewType) => {
-    if (lang === 'th') {
-      switch (type) {
-        case 'total': return 'ออเดอร์ทั้งหมด';
-        case 'completed': return 'ออเดอร์สำเร็จ';
-        case 'voided': return 'ออเดอร์ที่ยกเลิก';
-        case 'pending': return 'รอชำระเงิน';
-        default: return '';
-      }
-    } else {
-      switch (type) {
-        case 'total': return 'All Orders';
-        case 'completed': return 'Completed Orders';
-        case 'voided': return 'Voided Orders';
-        case 'pending': return 'Pending Payment';
-        default: return '';
-      }
+  const getViewTitleKey = (type: ViewType): string => {
+    switch (type) {
+      case 'total': return 'allOrders';
+      case 'completed': return 'completedOrders';
+      case 'voided': return 'voidedOrders';
+      case 'pending': return 'pendingPayment';
+      default: return 'allOrders';
     }
   };
 
@@ -325,7 +340,11 @@ export default function CashierDashboardPage() {
       <body>
         <div class="header">
           <h1>${session?.restaurantName || 'Restaurant'}</h1>
-          <p>Daily Cashier Report</p>
+          ${restaurantInfo.address ? `<p style="font-size: 10px;">${restaurantInfo.address}</p>` : ''}
+          ${restaurantInfo.phone ? `<p style="font-size: 10px;">Tel: ${restaurantInfo.phone}</p>` : ''}
+          ${restaurantInfo.gst_number ? `<p style="font-size: 10px;">GST No: ${restaurantInfo.gst_number}</p>` : ''}
+          ${restaurantInfo.ird_number ? `<p style="font-size: 10px;">IRD No: ${restaurantInfo.ird_number}</p>` : ''}
+          <p style="margin-top: 10px; font-weight: bold;">Daily Cashier Report</p>
           <p>${selectedDate}</p>
         </div>
 
@@ -349,6 +368,10 @@ export default function CashierDashboardPage() {
           <div class="row total">
             <span>TOTAL REVENUE:</span>
             <span>$${summary.total_revenue.toFixed(2)} NZD</span>
+          </div>
+          <div class="row" style="font-size: 10px; color: #666;">
+            <span>Incl. GST (15%):</span>
+            <span>$${(summary.total_revenue * 3 / 23).toFixed(2)}</span>
           </div>
         </div>
 
@@ -406,7 +429,7 @@ export default function CashierDashboardPage() {
       {/* Sub Header - Date and Controls */}
       <div className="bg-slate-800 px-4 py-2 flex items-center justify-between border-b border-slate-700">
         <h2 className={`text-lg font-semibold ${themeClasses.textPrimary}`}>
-          {lang === 'th' ? 'รายงานประจำวัน' : 'Daily Report'}
+          <BilingualText category="cashier" textKey="dailyReport" lang={lang} />
         </h2>
 
         <div className="flex items-center gap-3">
@@ -427,7 +450,9 @@ export default function CashierDashboardPage() {
             className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 text-sm"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">{lang === 'th' ? 'รีเฟรช' : 'Refresh'}</span>
+            <span className="hidden sm:inline">
+              <BilingualTextInline category="cashier" textKey="refresh" lang={lang} />
+            </span>
           </button>
 
           <button
@@ -436,7 +461,9 @@ export default function CashierDashboardPage() {
             className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50 text-sm"
           >
             <Eye className="w-4 h-4" />
-            <span className="hidden sm:inline">{lang === 'th' ? 'ดูตัวอย่าง' : 'Preview'}</span>
+            <span className="hidden sm:inline">
+              <BilingualTextInline category="cashier" textKey="preview" lang={lang} />
+            </span>
           </button>
 
           <button
@@ -445,7 +472,9 @@ export default function CashierDashboardPage() {
             className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 text-sm"
           >
             <Printer className="w-4 h-4" />
-            <span className="hidden sm:inline">{lang === 'th' ? 'พิมพ์' : 'Print'}</span>
+            <span className="hidden sm:inline">
+              <BilingualTextInline category="cashier" textKey="print" lang={lang} />
+            </span>
           </button>
         </div>
       </div>
@@ -473,7 +502,9 @@ export default function CashierDashboardPage() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <Receipt className="w-6 h-6 text-blue-400" />
-                    <span className="text-slate-400">{lang === 'th' ? 'ออเดอร์ทั้งหมด' : 'Total Orders'}</span>
+                    <span className="text-slate-400">
+                      <BilingualText category="cashier" textKey="totalOrders" lang={lang} englishClassName="text-[10px] opacity-50" />
+                    </span>
                   </div>
                   <Eye className="w-5 h-5 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
@@ -487,7 +518,9 @@ export default function CashierDashboardPage() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <CheckCircle className="w-6 h-6 text-green-400" />
-                    <span className="text-slate-400">{lang === 'th' ? 'สำเร็จ' : 'Completed'}</span>
+                    <span className="text-slate-400">
+                      <BilingualText category="cashier" textKey="completed" lang={lang} englishClassName="text-[10px] opacity-50" />
+                    </span>
                   </div>
                   <Eye className="w-5 h-5 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
@@ -501,7 +534,9 @@ export default function CashierDashboardPage() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <XCircle className="w-6 h-6 text-red-400" />
-                    <span className="text-slate-400">{lang === 'th' ? 'ยกเลิก' : 'Voided'}</span>
+                    <span className="text-slate-400">
+                      <BilingualText category="cashier" textKey="voided" lang={lang} englishClassName="text-[10px] opacity-50" />
+                    </span>
                   </div>
                   <Eye className="w-5 h-5 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
@@ -515,7 +550,9 @@ export default function CashierDashboardPage() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <Clock className="w-6 h-6 text-yellow-400" />
-                    <span className="text-slate-400">{lang === 'th' ? 'รอชำระเงิน' : 'Pending Payment'}</span>
+                    <span className="text-slate-400">
+                      <BilingualText category="cashier" textKey="pendingPayment" lang={lang} englishClassName="text-[10px] opacity-50" />
+                    </span>
                   </div>
                   <Eye className="w-5 h-5 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
@@ -529,7 +566,9 @@ export default function CashierDashboardPage() {
                 <div>
                   <div className="flex items-center gap-3 mb-2">
                     <TrendingUp className="w-8 h-8" />
-                    <span className="text-lg opacity-90">{lang === 'th' ? 'รายได้รวม' : 'Total Revenue'}</span>
+                    <span className="text-lg opacity-90">
+                      <BilingualText category="cashier" textKey="totalRevenue" lang={lang} englishClassName="text-xs opacity-70" />
+                    </span>
                   </div>
                   <p className="text-5xl font-bold">${summary.total_revenue.toFixed(2)}</p>
                   <p className="text-lg opacity-75 mt-1">NZD</p>
@@ -542,14 +581,16 @@ export default function CashierDashboardPage() {
             <div className="bg-slate-800 rounded-xl p-6">
               <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                 <CreditCard className="w-6 h-6 text-blue-400" />
-                {lang === 'th' ? 'รายได้ตามวิธีชำระเงิน' : 'Revenue by Payment Method'}
+                <BilingualText category="cashier" textKey="revenueByPayment" lang={lang} englishClassName="text-xs opacity-60" />
               </h2>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-blue-500/20 border border-blue-500/30 rounded-lg p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <CreditCard className="w-5 h-5 text-blue-400" />
-                    <span className="text-blue-300 text-sm">{lang === 'th' ? 'บัตรเครดิต/เดบิต' : 'Credit/Debit'}</span>
+                    <span className="text-blue-300 text-sm">
+                      <BilingualText category="cashier" textKey="creditDebit" lang={lang} englishClassName="text-[10px] opacity-60" />
+                    </span>
                   </div>
                   <p className="text-2xl font-bold text-blue-400">
                     ${summary.revenue_by_method.card.toFixed(2)}
@@ -559,7 +600,9 @@ export default function CashierDashboardPage() {
                 <div className="bg-green-500/20 border border-green-500/30 rounded-lg p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Building2 className="w-5 h-5 text-green-400" />
-                    <span className="text-green-300 text-sm">{lang === 'th' ? 'โอนเงิน' : 'Bank Transfer'}</span>
+                    <span className="text-green-300 text-sm">
+                      <BilingualText category="cashier" textKey="bankTransfer" lang={lang} englishClassName="text-[10px] opacity-60" />
+                    </span>
                   </div>
                   <p className="text-2xl font-bold text-green-400">
                     ${summary.revenue_by_method.bank_transfer.toFixed(2)}
@@ -569,7 +612,9 @@ export default function CashierDashboardPage() {
                 <div className="bg-orange-500/20 border border-orange-500/30 rounded-lg p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Banknote className="w-5 h-5 text-orange-400" />
-                    <span className="text-orange-300 text-sm">{lang === 'th' ? 'เงินสด' : 'Cash at Counter'}</span>
+                    <span className="text-orange-300 text-sm">
+                      <BilingualText category="cashier" textKey="cashAtCounter" lang={lang} englishClassName="text-[10px] opacity-60" />
+                    </span>
                   </div>
                   <p className="text-2xl font-bold text-orange-400">
                     ${summary.revenue_by_method.cash_at_counter.toFixed(2)}
@@ -579,7 +624,9 @@ export default function CashierDashboardPage() {
                 <div className="bg-yellow-500/20 border border-yellow-500/30 rounded-lg p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Clock className="w-5 h-5 text-yellow-400" />
-                    <span className="text-yellow-300 text-sm">{lang === 'th' ? 'ยังไม่ชำระ' : 'Unpaid'}</span>
+                    <span className="text-yellow-300 text-sm">
+                      <BilingualText category="cashier" textKey="unpaid" lang={lang} englishClassName="text-[10px] opacity-60" />
+                    </span>
                   </div>
                   <p className="text-2xl font-bold text-yellow-400">
                     ${summary.revenue_by_method.unpaid.toFixed(2)}
@@ -593,7 +640,8 @@ export default function CashierDashboardPage() {
               <div className="bg-slate-800 rounded-xl p-6">
                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                   <AlertTriangle className="w-6 h-6 text-red-400" />
-                  {lang === 'th' ? `ออเดอร์ที่ยกเลิก (${summary.void_reasons.length})` : `Voided Orders (${summary.void_reasons.length})`}
+                  <BilingualText category="cashier" textKey="voidedOrders" lang={lang} englishClassName="text-xs opacity-60" />
+                  <span className="text-slate-400">({summary.void_reasons.length})</span>
                 </h2>
 
                 <div className="space-y-3">
@@ -604,7 +652,7 @@ export default function CashierDashboardPage() {
                     >
                       <div>
                         <p className="text-sm text-slate-400">
-                          Order #{item.order_id.slice(0, 8).toUpperCase()}
+                          <BilingualTextInline category="cashier" textKey="orderId" lang={lang} /> #{item.order_id.slice(0, 8).toUpperCase()}
                         </p>
                         <p className="text-red-400">{item.reason}</p>
                       </div>
@@ -616,41 +664,11 @@ export default function CashierDashboardPage() {
                 </div>
               </div>
             )}
-
-            {/* Quick Actions */}
-            <div className="bg-slate-800 rounded-xl p-6">
-              <h2 className="text-xl font-bold mb-4">{lang === 'th' ? 'ทางลัด' : 'Quick Actions'}</h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <button
-                  onClick={() => router.push('/pos/orders')}
-                  className="p-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-center"
-                >
-                  <Receipt className="w-8 h-8 mx-auto mb-2" />
-                  <span>{lang === 'th' ? 'ดูออเดอร์' : 'View Orders'}</span>
-                </button>
-
-                <button
-                  onClick={printReport}
-                  className="p-4 bg-green-600 hover:bg-green-700 rounded-lg text-center"
-                >
-                  <Printer className="w-8 h-8 mx-auto mb-2" />
-                  <span>{lang === 'th' ? 'พิมพ์รายงาน' : 'Print Report'}</span>
-                </button>
-
-                <button
-                  onClick={fetchSummary}
-                  className="p-4 bg-orange-600 hover:bg-orange-700 rounded-lg text-center"
-                >
-                  <RefreshCw className="w-8 h-8 mx-auto mb-2" />
-                  <span>{lang === 'th' ? 'รีเฟรช' : 'Refresh Data'}</span>
-                </button>
-              </div>
-            </div>
           </div>
         ) : (
           <div className="text-center text-slate-500 py-12">
             <Receipt className="w-16 h-16 mx-auto mb-4 opacity-50" />
-            <p>{lang === 'th' ? 'ไม่มีข้อมูลสำหรับวันที่เลือก' : 'No data available for the selected date'}</p>
+            <BilingualText category="cashier" textKey="noData" lang={lang} />
           </div>
         )}
       </main>
@@ -660,7 +678,9 @@ export default function CashierDashboardPage() {
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-slate-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden my-4">
             <div className="p-4 border-b border-slate-700 flex items-center justify-between">
-              <h3 className="text-lg font-bold">{getViewTitle(viewType)}</h3>
+              <h3 className="text-lg font-bold">
+                <BilingualText category="cashier" textKey={getViewTitleKey(viewType)} lang={lang} englishClassName="text-xs opacity-60" />
+              </h3>
               <button
                 onClick={() => setViewType(null)}
                 className="p-1 hover:bg-slate-700 rounded"
@@ -677,7 +697,7 @@ export default function CashierDashboardPage() {
               ) : orderDetails.length === 0 ? (
                 <div className="text-center text-slate-500 py-12">
                   <Receipt className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>ไม่พบข้อมูล / No orders found</p>
+                  <BilingualText category="cashier" textKey="noOrders" lang={lang} />
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -696,7 +716,9 @@ export default function CashierDashboardPage() {
                             #{order.id.slice(0, 8).toUpperCase()}
                           </p>
                           <p className="text-sm text-slate-400">
-                            {order.table_no ? `โต๊ะ ${order.table_no}` : order.customer_name || 'N/A'}
+                            {order.table_no ? (
+                              <><BilingualTextInline category="cashier" textKey="table" lang={lang} /> {order.table_no}</>
+                            ) : order.customer_name || 'N/A'}
                           </p>
                           <p className="text-xs text-slate-500">
                             {new Date(order.created_at).toLocaleTimeString('th-TH')}
@@ -713,8 +735,13 @@ export default function CashierDashboardPage() {
                             order.payment_status === 'paid' ? 'bg-green-500/20 text-green-400' :
                             'bg-yellow-500/20 text-yellow-400'
                           }`}>
-                            {order.status === 'voided' ? 'Voided' :
-                             order.payment_status === 'paid' ? 'Paid' : 'Unpaid'}
+                            {order.status === 'voided' ? (
+                              <BilingualTextInline category="cashier" textKey="voided" lang={lang} />
+                            ) : order.payment_status === 'paid' ? (
+                              <BilingualTextInline category="cashier" textKey="paid" lang={lang} />
+                            ) : (
+                              <BilingualTextInline category="cashier" textKey="unpaid" lang={lang} />
+                            )}
                           </span>
                         </div>
                       </div>
@@ -732,9 +759,13 @@ export default function CashierDashboardPage() {
                       {/* Payment Method */}
                       {order.payment_method && (
                         <p className="text-xs text-slate-400">
-                          Payment: {order.payment_method === 'card' ? 'Credit/Debit Card' :
-                                   order.payment_method === 'bank_transfer' ? 'Bank Transfer' :
-                                   order.payment_method === 'cash_at_counter' ? 'Cash at Counter' : order.payment_method}
+                          <BilingualTextInline category="cashier" textKey="payment" lang={lang} />: {order.payment_method === 'card' ? (
+                            <BilingualTextInline category="cashier" textKey="creditDebit" lang={lang} />
+                          ) : order.payment_method === 'bank_transfer' ? (
+                            <BilingualTextInline category="cashier" textKey="bankTransfer" lang={lang} />
+                          ) : order.payment_method === 'cash_at_counter' ? (
+                            <BilingualTextInline category="cashier" textKey="cashAtCounter" lang={lang} />
+                          ) : order.payment_method}
                         </p>
                       )}
 
@@ -742,7 +773,7 @@ export default function CashierDashboardPage() {
                       {order.void_reason && (
                         <div className="mt-2 p-2 bg-red-500/10 rounded border border-red-500/30">
                           <p className="text-sm text-red-400">
-                            <strong>Void reason:</strong> {order.void_reason}
+                            <strong><BilingualTextInline category="cashier" textKey="voidReason" lang={lang} />:</strong> {order.void_reason}
                           </p>
                         </div>
                       )}
@@ -757,7 +788,7 @@ export default function CashierDashboardPage() {
                 onClick={() => setViewType(null)}
                 className="w-full py-2 bg-slate-600 hover:bg-slate-500 rounded-lg font-semibold"
               >
-                ปิด / Close
+                <BilingualText category="common" textKey="close" lang={lang} englishClassName="text-xs opacity-60" />
               </button>
             </div>
           </div>
@@ -769,7 +800,9 @@ export default function CashierDashboardPage() {
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white rounded-xl max-w-md w-full text-black my-4">
             <div className="p-4 border-b flex items-center justify-between bg-slate-100 rounded-t-xl">
-              <h3 className="text-lg font-bold">ตัวอย่างก่อนพิมพ์ / Print Preview</h3>
+              <h3 className="text-lg font-bold">
+                <BilingualText category="cashier" textKey="printPreview" lang={lang} primaryClassName="text-black" englishClassName="text-xs opacity-60" />
+              </h3>
               <button
                 onClick={() => setShowPrintPreview(false)}
                 className="p-1 hover:bg-slate-200 rounded"
@@ -782,59 +815,73 @@ export default function CashierDashboardPage() {
             <div className="p-6 font-mono text-sm">
               <div className="text-center border-b-2 border-dashed border-gray-400 pb-4 mb-4">
                 <h1 className="text-lg font-bold">{session?.restaurantName}</h1>
-                <p className="text-gray-600">Daily Cashier Report</p>
+                {restaurantInfo.address && (
+                  <p className="text-xs text-gray-500">{restaurantInfo.address}</p>
+                )}
+                {restaurantInfo.phone && (
+                  <p className="text-xs text-gray-500">Tel: {restaurantInfo.phone}</p>
+                )}
+                {restaurantInfo.gst_number && (
+                  <p className="text-xs text-gray-500">GST No: {restaurantInfo.gst_number}</p>
+                )}
+                {restaurantInfo.ird_number && (
+                  <p className="text-xs text-gray-500">IRD No: {restaurantInfo.ird_number}</p>
+                )}
+                <p className="text-gray-600 mt-2">
+                  <BilingualTextInline category="cashier" textKey="dailyCashierReport" lang={lang} />
+                </p>
                 <p className="text-gray-500">{selectedDate}</p>
               </div>
 
               <div className="border-b border-dashed border-gray-400 pb-4 mb-4 space-y-2">
                 <div className="flex justify-between">
-                  <span>Total Orders:</span>
+                  <span><BilingualTextInline category="cashier" textKey="totalOrders" lang={lang} />:</span>
                   <span className="font-bold">{summary.total_orders}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Completed:</span>
+                  <span><BilingualTextInline category="cashier" textKey="completed" lang={lang} />:</span>
                   <span className="font-bold text-green-600">{summary.completed_orders}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Voided:</span>
+                  <span><BilingualTextInline category="cashier" textKey="voided" lang={lang} />:</span>
                   <span className="font-bold text-red-600">{summary.voided_orders}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Pending Payment:</span>
+                  <span><BilingualTextInline category="cashier" textKey="pendingPayment" lang={lang} />:</span>
                   <span className="font-bold text-yellow-600">{summary.pending_payment}</span>
                 </div>
               </div>
 
               <div className="border-b border-dashed border-gray-400 pb-4 mb-4">
-                <p className="font-bold mb-2">Revenue by Payment:</p>
+                <p className="font-bold mb-2"><BilingualTextInline category="cashier" textKey="revenueByPaymentMethod" lang={lang} />:</p>
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
-                    <span>Credit/Debit:</span>
+                    <span><BilingualTextInline category="cashier" textKey="creditDebit" lang={lang} />:</span>
                     <span>${summary.revenue_by_method.card.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Bank Transfer:</span>
+                    <span><BilingualTextInline category="cashier" textKey="bankTransfer" lang={lang} />:</span>
                     <span>${summary.revenue_by_method.bank_transfer.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Cash at Counter:</span>
+                    <span><BilingualTextInline category="cashier" textKey="cashAtCounter" lang={lang} />:</span>
                     <span>${summary.revenue_by_method.cash_at_counter.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Unpaid:</span>
+                    <span><BilingualTextInline category="cashier" textKey="unpaid" lang={lang} />:</span>
                     <span>${summary.revenue_by_method.unpaid.toFixed(2)}</span>
                   </div>
                 </div>
               </div>
 
               <div className="text-center text-xl font-bold border-t-2 border-dashed border-gray-400 pt-4">
-                <p className="text-gray-600 text-sm">Total Revenue</p>
+                <p className="text-gray-600 text-sm"><BilingualTextInline category="cashier" textKey="totalRevenue" lang={lang} /></p>
                 <p className="text-green-600">${summary.total_revenue.toFixed(2)} NZD</p>
               </div>
 
               <div className="text-center mt-4 text-xs text-gray-500">
-                <p>Printed: {new Date().toLocaleString()}</p>
-                <p>Powered by Smart Menu</p>
+                <p><BilingualTextInline category="cashier" textKey="printed" lang={lang} />: {new Date().toLocaleString()}</p>
+                <p><BilingualTextInline category="cashier" textKey="poweredBy" lang={lang} /> Smart Menu</p>
               </div>
             </div>
 
@@ -843,7 +890,7 @@ export default function CashierDashboardPage() {
                 onClick={() => setShowPrintPreview(false)}
                 className="flex-1 py-2 bg-slate-300 hover:bg-slate-400 rounded-lg font-semibold text-black"
               >
-                ปิด / Close
+                <BilingualText category="common" textKey="close" lang={lang} primaryClassName="text-black" englishClassName="text-xs opacity-60" />
               </button>
               <button
                 onClick={() => {
@@ -853,7 +900,7 @@ export default function CashierDashboardPage() {
                 className="flex-1 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold flex items-center justify-center gap-2"
               >
                 <Printer className="w-5 h-5" />
-                พิมพ์ / Print
+                <BilingualText category="cashier" textKey="print" lang={lang} englishClassName="text-xs opacity-60" />
               </button>
             </div>
           </div>

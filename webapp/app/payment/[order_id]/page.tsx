@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { CreditCard, Building2, Loader2, CheckCircle, AlertCircle, ArrowLeft, QrCode, Upload, Copy, Check } from 'lucide-react';
+import { CreditCard, Building2, Loader2, CheckCircle, AlertCircle, ArrowLeft, QrCode, Upload, Copy, Check, Banknote } from 'lucide-react';
 import Link from 'next/link';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { getStripe } from '@/lib/stripe/config';
@@ -41,12 +41,14 @@ interface BankAccount {
 interface PaymentSettings {
   accept_card: boolean;
   accept_bank_transfer: boolean;
+  accept_cash_at_counter?: boolean;  // Pay at counter for dine-in
   bank_accounts: BankAccount[];
 }
 
 interface Restaurant {
   id: string;
   name: string;
+  slug?: string;
   payment_settings?: PaymentSettings;
 }
 
@@ -353,7 +355,8 @@ export default function PaymentPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
-  const [selectedMethod, setSelectedMethod] = useState<'card' | 'bank_transfer' | null>(null);
+  const [selectedMethod, setSelectedMethod] = useState<'card' | 'bank_transfer' | 'cash_at_counter' | null>(null);
+  const [processingCashPayment, setProcessingCashPayment] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
@@ -486,6 +489,39 @@ export default function PaymentPage() {
     setPaymentSuccess(true);
   };
 
+  // Handle Pay at Counter selection
+  const handlePayAtCounter = async () => {
+    if (!order) return;
+
+    setProcessingCashPayment(true);
+    setError(null);
+
+    try {
+      // Update order to confirm and set payment method to cash_at_counter
+      const response = await fetch(`${API_URL}/api/orders/${order.id}/pay-at-counter`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payment_method: 'cash_at_counter',
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Redirect to order status page
+        router.push(`/order-status?order=${order.id}&type=${order.service_type}&payment=counter`);
+      } else {
+        setError(data.detail || 'Failed to confirm order');
+      }
+    } catch (err) {
+      console.error('Error confirming pay at counter:', err);
+      setError('Failed to confirm order. Please try again.');
+    } finally {
+      setProcessingCashPayment(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
@@ -555,7 +591,7 @@ export default function PaymentPage() {
         {/* Header */}
         <div className="mb-6">
           <Link
-            href={`/restaurant/${order.restaurant_id}`}
+            href={`/restaurant/${restaurant?.slug || order.restaurant_id}`}
             className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -585,12 +621,6 @@ export default function PaymentPage() {
               <span className="text-gray-600">Subtotal</span>
               <span>${order.subtotal.toFixed(2)}</span>
             </div>
-            {order.tax > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Tax</span>
-                <span>${order.tax.toFixed(2)}</span>
-              </div>
-            )}
             {order.delivery_fee && order.delivery_fee > 0 && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Delivery Fee</span>
@@ -600,6 +630,11 @@ export default function PaymentPage() {
             <div className="flex justify-between text-lg font-bold pt-2 border-t border-gray-200">
               <span>Total</span>
               <span className="text-blue-600">${order.total_price.toFixed(2)} NZD</span>
+            </div>
+            {/* Always show GST - NZ standard 15%, formula: total * 3 / 23 for GST-inclusive price */}
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>Incl. GST (15%)</span>
+              <span>${(order.tax > 0 ? order.tax : Math.round(order.total_price * 3 / 23 * 100) / 100).toFixed(2)}</span>
             </div>
           </div>
         </div>
@@ -646,6 +681,26 @@ export default function PaymentPage() {
                 </div>
               </button>
             )}
+
+            {/* Pay at Counter - Only for Dine-in orders */}
+            {order.service_type === 'dine_in' && (
+              <button
+                onClick={() => setSelectedMethod('cash_at_counter')}
+                className={`w-full p-4 rounded-lg border-2 text-left transition-all flex items-center gap-4 ${
+                  selectedMethod === 'cash_at_counter'
+                    ? 'border-orange-500 bg-orange-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
+                  <Banknote className="w-6 h-6 text-orange-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">Pay at Counter</h3>
+                  <p className="text-sm text-gray-600">Pay with cash or card at the cashier</p>
+                </div>
+              </button>
+            )}
           </div>
         </div>
 
@@ -680,6 +735,57 @@ export default function PaymentPage() {
               bankAccounts={paymentSettings.bank_accounts}
               onSlipUpload={handleSlipUpload}
             />
+          </div>
+        )}
+
+        {/* Pay at Counter Confirmation */}
+        {selectedMethod === 'cash_at_counter' && (
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Banknote className="w-8 h-8 text-orange-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Pay at Counter</h3>
+              <p className="text-gray-600">
+                Your order will be sent to the kitchen. Please pay at the cashier when ready.
+              </p>
+            </div>
+
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-orange-800">Table Number</span>
+                <span className="font-bold text-orange-900">{order.table_no || '-'}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-orange-800">Amount to Pay</span>
+                <span className="text-2xl font-bold text-orange-600">${order.total_price.toFixed(2)} NZD</span>
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-yellow-800">
+                <strong>Note:</strong> Please show your table number to the cashier when paying.
+                You can pay with cash or card at the counter.
+              </p>
+            </div>
+
+            <button
+              onClick={handlePayAtCounter}
+              disabled={processingCashPayment}
+              className="w-full py-4 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg font-bold text-lg hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {processingCashPayment ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-5 h-5" />
+                  Confirm Order & Pay at Counter
+                </>
+              )}
+            </button>
           </div>
         )}
 

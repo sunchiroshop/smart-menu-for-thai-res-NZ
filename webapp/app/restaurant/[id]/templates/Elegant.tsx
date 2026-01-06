@@ -20,10 +20,41 @@ interface ElegantProps {
   groupedMenus: Record<string, MenuItem[]>;
   themeColor: string;
   onItemClick: (item: MenuItem) => void;
+  selectedLanguage?: string;
 }
 
-export default function Elegant({ menus, groupedMenus, themeColor, onItemClick }: ElegantProps) {
+// Translations for UI elements
+const translations: Record<string, Record<string, string>> = {
+  bestseller: {
+    'original': 'สินค้าขายดี', 'th': 'สินค้าขายดี', 'en': 'Bestseller', 'zh': '畅销品',
+    'ja': 'ベストセラー', 'ko': '베스트셀러', 'vi': 'Bán chạy nhất', 'hi': 'बेस्टसेलर',
+    'es': 'Más vendido', 'fr': 'Meilleures ventes', 'de': 'Bestseller', 'id': 'Terlaris', 'ms': 'Terlaris',
+  },
+  popularDishes: {
+    'original': 'เมนูยอดนิยม', 'th': 'เมนูยอดนิยม', 'en': 'Popular dishes', 'zh': '热门菜品',
+    'ja': '人気料理', 'ko': '인기 메뉴', 'vi': 'Món phổ biến', 'hi': 'लोकप्रिय व्यंजन',
+    'es': 'Platos populares', 'fr': 'Plats populaires', 'de': 'Beliebte Gerichte', 'id': 'Hidangan Populer', 'ms': 'Hidangan Popular',
+  },
+  bestSellerBadge: {
+    'original': 'ขายดี', 'th': 'ขายดี', 'en': 'BEST SELLER', 'zh': '热卖',
+    'ja': '人気', 'ko': '인기', 'vi': 'BÁN CHẠY', 'hi': 'बेस्ट सेलर',
+    'es': 'MÁS VENDIDO', 'fr': 'BEST SELLER', 'de': 'BESTSELLER', 'id': 'TERLARIS', 'ms': 'TERLARIS',
+  },
+  price: {
+    'original': 'ราคา', 'th': 'ราคา', 'en': 'Price', 'zh': '价格',
+    'ja': '価格', 'ko': '가격', 'vi': 'Giá', 'hi': 'मूल्य',
+    'es': 'Precio', 'fr': 'Prix', 'de': 'Preis', 'id': 'Harga', 'ms': 'Harga',
+  },
+  addToOrder: {
+    'original': 'เพิ่มในรายการ', 'th': 'เพิ่มในรายการ', 'en': 'Add to Order', 'zh': '加入订单',
+    'ja': '注文に追加', 'ko': '주문에 추가', 'vi': 'Thêm vào đơn', 'hi': 'ऑर्डर में जोड़ें',
+    'es': 'Añadir al pedido', 'fr': 'Ajouter à la commande', 'de': 'Zur Bestellung', 'id': 'Tambah ke Pesanan', 'ms': 'Tambah ke Pesanan',
+  },
+};
+
+export default function Elegant({ menus, groupedMenus, themeColor, onItemClick, selectedLanguage = 'original' }: ElegantProps) {
   const isBestsellerCategory = (category: string) => category.toLowerCase() === 'bestseller';
+  const t = (key: keyof typeof translations) => translations[key][selectedLanguage] || translations[key]['en'];
 
   return (
     <div className="max-w-4xl mx-auto space-y-16">
@@ -34,8 +65,8 @@ export default function Elegant({ menus, groupedMenus, themeColor, onItemClick }
             <div className="bg-gradient-to-r from-orange-50 to-red-50 -mx-4 px-4 py-6 rounded-xl border-2 border-orange-400 mb-10">
               <h2 className="text-4xl font-serif font-bold text-orange-600 flex items-center justify-center gap-4">
                 <Flame className="w-10 h-10 text-orange-500 fill-orange-500" />
-                Bestseller
-                <span className="text-xl font-normal text-orange-500">Popular dishes</span>
+                {t('bestseller')}
+                <span className="text-xl font-normal text-orange-500">{t('popularDishes')}</span>
               </h2>
             </div>
           ) : (
@@ -87,7 +118,7 @@ export default function Elegant({ menus, groupedMenus, themeColor, onItemClick }
                             }}
                           >
                             <Star className="w-4 h-4 fill-current" />
-                            BEST SELLER
+                            {t('bestSellerBadge')}
                           </div>
                         </div>
                       )}
@@ -102,20 +133,20 @@ export default function Elegant({ menus, groupedMenus, themeColor, onItemClick }
                     <h3 className={`font-serif font-bold text-gray-900 mb-2 ${
                       menu.is_best_seller ? 'text-3xl' : 'text-2xl'
                     }`}>
-                      {menu.name}
+                      {selectedLanguage === 'en' && menu.nameEn ? menu.nameEn : menu.name}
                     </h3>
 
                     {/* Description */}
                     {menu.description && (
                       <p className="text-gray-600 leading-relaxed mb-6">
-                        {menu.description}
+                        {selectedLanguage === 'en' && menu.descriptionEn ? menu.descriptionEn : menu.description}
                       </p>
                     )}
-                    
+
                     {/* Price & Button */}
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-sm text-gray-500 block mb-1">Price</span>
+                        <span className="text-sm text-gray-500 block mb-1">{t('price')}</span>
                         <span className="text-3xl font-bold" style={{ color: themeColor }}>
                           ${menu.price}
                         </span>
@@ -129,7 +160,7 @@ export default function Elegant({ menus, groupedMenus, themeColor, onItemClick }
                         style={{ backgroundColor: themeColor }}
                       >
                         <Plus className="w-5 h-5" />
-                        Add to Order
+                        {t('addToOrder')}
                       </button>
                     </div>
                   </div>

@@ -4,8 +4,9 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signIn, signUp } from '@/lib/supabase/auth';
 import { supabase } from '@/lib/supabase/client';
-import { Mail, Lock, User, Eye, EyeOff, ChefHat, Loader2 } from 'lucide-react';
+import { Mail, Lock, User, Eye, EyeOff, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 function LoginContent() {
   const router = useRouter();
@@ -166,12 +167,16 @@ function LoginContent() {
         {/* Logo & Title */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-block mb-4">
-            <div className="bg-orange-500 p-4 rounded-full inline-block">
-              <ChefHat className="w-12 h-12 text-white" />
-            </div>
+            <Image
+              src="/images/app-logo.png"
+              alt="SweetAsMenu"
+              width={200}
+              height={50}
+              className="h-12 w-auto mx-auto"
+              priority
+            />
           </Link>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">SmartMenu</h1>
-          <p className="text-gray-600">ระบบเมนูอาหารอัจฉริยะ</p>
+          <p className="text-gray-600 mt-2">ระบบเมนูอาหารอัจฉริยะ</p>
         </div>
 
         {/* Card */}
