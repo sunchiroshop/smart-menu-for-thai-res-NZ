@@ -33,6 +33,7 @@ from services.staff_service import staff_service  # Staff Management
 from services.image_library_service import image_library_service  # Shared Image Library
 from services.delivery_service import delivery_service  # Delivery distance calculation
 from services.admin_service import admin_service  # Super Admin Dashboard
+from services.security_middleware import setup_security  # Security: Rate limiting, headers
 
 # Initialize Supabase client for direct database access (menu_translations, etc.)
 try:
@@ -86,14 +87,40 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
+# ============================================================
+# Security Configuration
+# ============================================================
+
+# Allowed origins for CORS (production domains)
+ALLOWED_ORIGINS = [
+    # Production domains
+    "https://sweetasmenu.com",
+    "https://www.sweetasmenu.com",
+    "https://app.sweetasmenu.com",
+    # Vercel preview deployments
+    "https://*.vercel.app",
+    # Local development
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+# Get additional origins from environment variable
+EXTRA_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",")
+ALLOWED_ORIGINS.extend([o.strip() for o in EXTRA_ORIGINS if o.strip()])
+
+# CORS middleware with restricted origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin"],
+    expose_headers=["X-Request-ID"],
+    max_age=600,  # Cache preflight for 10 minutes
 )
+
+# Setup security middleware (Rate limiting, Security headers, Health check)
+setup_security(app)
 
 # ============================================================
 # Models

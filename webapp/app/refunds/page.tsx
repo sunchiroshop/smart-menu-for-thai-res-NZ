@@ -323,7 +323,8 @@ export default function RefundPolicyPage() {
           <div className="flex flex-wrap justify-center gap-6 text-sm text-gray-500">
             <Link href="/privacy" className="hover:text-amber-600">Privacy Policy</Link>
             <Link href="/terms" className="hover:text-amber-600">Terms of Service</Link>
-            <Link href="/refunds" className="hover:text-amber-600">Refund Policy</Link>
+            <Link href="/refunds" className="hover:text-amber-600 text-amber-600">Refund Policy</Link>
+            <Link href="/contact" className="hover:text-amber-600">Contact Us</Link>
           </div>
           <p className="text-center text-sm text-gray-400 mt-4">
             &copy; {new Date().getFullYear()} {companyName}. All rights reserved.
