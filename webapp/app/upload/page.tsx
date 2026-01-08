@@ -68,7 +68,7 @@ export default function AddMenuItemPage() {
   const [useAIGeneration, setUseAIGeneration] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string>('');
-  const [imageGenerationStyle, setImageGenerationStyle] = useState<'professional' | 'rustic' | 'elegant' | 'casual' | 'modern'>('professional');
+  const [imageGenerationStyle, setImageGenerationStyle] = useState<'professional' | 'rustic' | 'elegant' | 'casual' | 'modern' | 'portrait'>('professional');
   const [cuisineType, setCuisineType] = useState<string>('Thai');
   const [aiDishName, setAiDishName] = useState<string>('');
   const [aiDescription, setAiDescription] = useState<string>('');
@@ -106,7 +106,10 @@ export default function AddMenuItemPage() {
   const [editCategoryName, setEditCategoryName] = useState('');
   const [editCategoryNameEn, setEditCategoryNameEn] = useState('');
   const [translatingCategory, setTranslatingCategory] = useState(false);
-  
+
+  // Menu Type Selection (NEW!) - before all steps
+  const [menuType, setMenuType] = useState<'food' | 'snack' | 'beverage'>('food');
+
   // Step 5.5: Choose Meats (NEW!)
   const [hasMeats, setHasMeats] = useState(false);
   const [meats, setMeats] = useState<Meat[]>([]);
@@ -210,7 +213,20 @@ export default function AddMenuItemPage() {
       localStorage.setItem('menu_categories', JSON.stringify(categories));
     }
   }, [categories]);
-  
+
+  // Auto-select portrait style for snack/beverage menu types
+  useEffect(() => {
+    if (menuType === 'snack' || menuType === 'beverage') {
+      // Suggest portrait style for non-food items
+      if (imageGenerationStyle === 'professional') {
+        setImageGenerationStyle('portrait');
+      }
+      // Also clear meats if any were selected
+      setHasMeats(false);
+      setMeats([]);
+    }
+  }, [menuType]);
+
   // UI State
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -854,11 +870,12 @@ export default function AddMenuItemPage() {
         category: selectedCat?.name || '',
         categoryEn: selectedCat?.nameEn || '',
         photo_url: photoUrl,
-        meats: hasMeats ? meats.filter(m => m.name).map(m => ({
+        meats: (menuType === 'food' && hasMeats) ? meats.filter(m => m.name).map(m => ({
           name: m.name,
           nameEn: m.nameEn || m.name,
           price: m.price
         })) : [],
+        menu_type: menuType, // NEW: Include menu type in saved data
         addOns: hasAddOns ? addOns.filter(a => a.name).map(a => ({
           name: a.name,
           nameEn: a.nameEn || a.name,
@@ -1060,6 +1077,87 @@ export default function AddMenuItemPage() {
           </div>
         )}
 
+        {/* Menu Type Selection - Before all steps */}
+        <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">
+            What type of menu item are you adding?
+          </h2>
+          <p className="text-gray-600 mb-6">
+            Select the type of item to customize the form for your needs
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Food Option */}
+            <button
+              onClick={() => setMenuType('food')}
+              className={`p-6 rounded-xl border-2 transition-all ${
+                menuType === 'food'
+                  ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200'
+                  : 'border-gray-200 hover:border-orange-300 hover:bg-orange-50/50'
+              }`}
+            >
+              <div className="text-4xl mb-3">🍛</div>
+              <h3 className={`font-bold text-lg mb-2 ${menuType === 'food' ? 'text-orange-600' : 'text-gray-900'}`}>
+                Main Dish
+              </h3>
+              <p className="text-sm text-gray-600">
+                Food items with meat options (e.g., Pad Thai, Fried Rice, Curry)
+              </p>
+              {menuType === 'food' && (
+                <div className="mt-3 inline-flex items-center text-orange-600 text-sm font-semibold">
+                  <Check className="w-4 h-4 mr-1" /> Selected
+                </div>
+              )}
+            </button>
+
+            {/* Snack/Dessert Option */}
+            <button
+              onClick={() => setMenuType('snack')}
+              className={`p-6 rounded-xl border-2 transition-all ${
+                menuType === 'snack'
+                  ? 'border-pink-500 bg-pink-50 ring-2 ring-pink-200'
+                  : 'border-gray-200 hover:border-pink-300 hover:bg-pink-50/50'
+              }`}
+            >
+              <div className="text-4xl mb-3">🍰</div>
+              <h3 className={`font-bold text-lg mb-2 ${menuType === 'snack' ? 'text-pink-600' : 'text-gray-900'}`}>
+                Snack / Dessert
+              </h3>
+              <p className="text-sm text-gray-600">
+                Appetizers, snacks, desserts (e.g., Spring Rolls, Mango Sticky Rice)
+              </p>
+              {menuType === 'snack' && (
+                <div className="mt-3 inline-flex items-center text-pink-600 text-sm font-semibold">
+                  <Check className="w-4 h-4 mr-1" /> Selected
+                </div>
+              )}
+            </button>
+
+            {/* Beverage Option */}
+            <button
+              onClick={() => setMenuType('beverage')}
+              className={`p-6 rounded-xl border-2 transition-all ${
+                menuType === 'beverage'
+                  ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
+                  : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/50'
+              }`}
+            >
+              <div className="text-4xl mb-3">🥤</div>
+              <h3 className={`font-bold text-lg mb-2 ${menuType === 'beverage' ? 'text-blue-600' : 'text-gray-900'}`}>
+                Beverage
+              </h3>
+              <p className="text-sm text-gray-600">
+                Drinks, smoothies, coffee (e.g., Thai Tea, Coconut Juice)
+              </p>
+              {menuType === 'beverage' && (
+                <div className="mt-3 inline-flex items-center text-blue-600 text-sm font-semibold">
+                  <Check className="w-4 h-4 mr-1" /> Selected
+                </div>
+              )}
+            </button>
+          </div>
+        </div>
+
         {/* Step 1: Photo Upload & Enhancement */}
         <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
           <div className="flex items-center justify-between mb-6">
@@ -1185,11 +1283,17 @@ export default function AddMenuItemPage() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-gray-900 bg-white"
                     >
                       <option value="professional">Professional</option>
+                      <option value="portrait">Portrait {menuType !== 'food' ? '(Recommended for Snack/Beverage)' : ''}</option>
                       <option value="rustic">Rustic</option>
                       <option value="elegant">Elegant</option>
                       <option value="casual">Casual</option>
                       <option value="modern">Modern</option>
                     </select>
+                    {menuType !== 'food' && (
+                      <p className="text-xs text-purple-600 mt-1">
+                        Tip: Portrait style is recommended for snacks, desserts, and beverages to match typical menu layouts
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -2081,7 +2185,8 @@ export default function AddMenuItemPage() {
             </div>
           </div>
 
-        {/* Step 5: Choose Meats (NEW!) */}
+        {/* Step 5: Choose Meats (Only for Main Dish) */}
+        {menuType === 'food' && (
         <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">
               5. Choose Meats
@@ -2192,11 +2297,12 @@ export default function AddMenuItemPage() {
               </div>
             )}
           </div>
+        )}
 
-        {/* Step 6: Add-ons */}
+        {/* Step 5/6: Add-ons (Step 5 for snack/beverage, Step 6 for food) */}
         <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">
-              6. Add-ons (Optional)
+              {menuType === 'food' ? '6' : '5'}. Add-ons (Optional)
             </h2>
 
             <label className="flex items-center cursor-pointer mb-4">
@@ -2390,8 +2496,8 @@ export default function AddMenuItemPage() {
                     </div>
                   )}
 
-                  {/* Choose Meats */}
-                  {hasMeats && meats.filter(m => m.name).length > 0 && (
+                  {/* Choose Meats (Only for Main Dish) */}
+                  {menuType === 'food' && hasMeats && meats.filter(m => m.name).length > 0 && (
                     <div className="mt-6 pt-4 border-t-2 border-orange-200">
                       <p className="text-sm font-bold text-orange-700 mb-3 uppercase tracking-wide flex items-center">
                         🥩 Choose Meats:

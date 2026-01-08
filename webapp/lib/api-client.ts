@@ -121,7 +121,7 @@ export interface GenerateImageRequest {
   dish_name: string;
   description: string;
   cuisine_type?: string;
-  style?: 'professional' | 'rustic' | 'elegant' | 'casual' | 'modern';
+  style?: 'professional' | 'rustic' | 'elegant' | 'casual' | 'modern' | 'portrait';
   user_id?: string; // Required for tracking usage limits
   logo_overlay?: {
     enabled: boolean;

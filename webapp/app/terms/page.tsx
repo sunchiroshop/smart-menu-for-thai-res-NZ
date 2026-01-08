@@ -4,7 +4,7 @@ import Link from 'next/link';
 
 export default function TermsOfServicePage() {
   const lastUpdated = "6 January 2026";
-  const companyName = "Zestio Tech Ltd.";
+  const companyName = "Zestio Tech Limited";
   const appName = "SweetAsMenu";
   const contactEmail = "support@zestiotech.com";
   const supportEmail = "support@zestiotech.com";

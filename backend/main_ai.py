@@ -142,12 +142,13 @@ class SaveMenuItemRequest(BaseModel):
     category: str
     categoryEn: Optional[str] = ""
     photo_url: Optional[str] = ""
-    meats: Optional[List[Dict[str, Any]]] = []  # NEW: Choose Meat options
+    menu_type: Optional[str] = "food"  # NEW: food, snack, beverage
+    meats: Optional[List[Dict[str, Any]]] = []  # Choose Meat options (only for food type)
     addOns: Optional[List[Dict[str, Any]]] = []
     showBothLanguages: Optional[bool] = True
     primaryLanguage: Optional[str] = "original"
     restaurant_id: Optional[str] = "default"
-    is_best_seller: Optional[bool] = False  # NEW: Best Seller flag
+    is_best_seller: Optional[bool] = False  # Best Seller flag
 
 class CreateCheckoutSessionRequest(BaseModel):
     price_id: str
@@ -799,6 +800,7 @@ async def save_menu_item(menu_item: SaveMenuItemRequest):
         print(f"   Name: {menu_data.get('name', 'N/A')}")
         print(f"   Price: {menu_data.get('price', 'N/A')}")
         print(f"   Category: {menu_data.get('category', 'N/A')}")
+        print(f"   Menu Type: {menu_data.get('menu_type', 'food')}")
         print(f"   Meats: {len(menu_data.get('meats', []))} options")
         print(f"   AddOns: {len(menu_data.get('addOns', []))} options")
         print(f"   Is Best Seller: {menu_data.get('is_best_seller', False)}")

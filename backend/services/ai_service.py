@@ -745,7 +745,8 @@ Requirements:
                 "rustic": "Homestyle, warm and cozy atmosphere, rustic tableware",
                 "elegant": "Fine dining, sophisticated plating, elegant garnish",
                 "casual": "Approachable, friendly, everyday meal setting",
-                "modern": "Contemporary plating, minimalist, artistic presentation"
+                "modern": "Contemporary plating, minimalist, artistic presentation",
+                "portrait": "Vertical portrait orientation, tall glass/cup for beverages, stacked presentation for snacks/desserts, menu card style composition, centered subject, clean background, ideal for menu displays"
             }
             
             full_prompt = f"{base_prompt}\n\n{style_adjustments.get(style, style_adjustments['professional'])}"

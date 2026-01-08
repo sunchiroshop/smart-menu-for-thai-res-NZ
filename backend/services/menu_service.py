@@ -93,7 +93,11 @@ class MenuService:
             # Add is_best_seller if provided
             if "is_best_seller" in menu_data:
                 db_data["is_best_seller"] = menu_data.get("is_best_seller", False)
-            
+
+            # Add menu_type if provided (food, snack, beverage)
+            if "menu_type" in menu_data:
+                db_data["menu_type"] = menu_data.get("menu_type", "food")
+
             # Store meats and addOns in options JSONB column
             import json
             options_data = {}
@@ -340,6 +344,7 @@ class MenuService:
             "image_url": db_item.get("image_url"),
             "category": category,
             "categoryEn": category_english,
+            "menu_type": db_item.get("menu_type", "food"),  # food, snack, beverage
             "meats": meats,
             "addOns": addOns,
             "is_active": db_item.get("is_active", True),
